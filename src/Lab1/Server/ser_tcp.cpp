@@ -13,8 +13,9 @@
 #include <process.h>
 #include <winsock.h>
 #include <iostream>
+#include <fstream>
 #include <windows.h>
-
+#include <conio.h>
 
 
 using namespace std;
@@ -85,6 +86,9 @@ union {struct sockaddr generic;
 	 char    sin_zero[8];
 	 }; */
 
+	void waitforenter() {
+		_getch();
+	}
 	int main(void){
 
 		WSADATA wsadata;
@@ -146,7 +150,6 @@ union {struct sockaddr generic;
 			//wait loop
 
 			while(1)
-
 			{
 
 				FD_SET(s,&readfds);  //always check the listener
@@ -166,19 +169,49 @@ union {struct sockaddr generic;
 				cout<<"accepted connection from "<<inet_ntoa(ca.ca_in.sin_addr)<<":"
 					<<hex<<htons(ca.ca_in.sin_port)<<endl;
 
-				//Fill in szbuffer from accepted request.
-				if((ibytesrecv = recv(s1,szbuffer,128,0)) == SOCKET_ERROR)
-					throw "Receive error in server program\n";
+				// Ready to receive data.
+				
+				// First, we're expecting an ASCII number as header
+				// Read maximum 20 bytes
+				if (ibytesrecv = recv(s1, szbuffer, 20, 0) == SOCKET_ERROR) {
+					cout << "Could not read header from client!";
+					waitforenter();
+					exit(1);
+				}
 
-				//Print reciept of successful message. 
-				cout << "This is message from client: " << szbuffer << endl;
+				// Try to parse length of payload in header
+				unsigned long len;
+				if (EOF == sscanf_s(szbuffer, "%20lu", &len)) {
+					cout << "Client sent invalid header!";
+					waitforenter();
+					exit(1);
+				}
 
-				//Send to Client the received message (echo it back).
-				ibufferlen = strlen(szbuffer);
+				ofstream theFile("output.txt", ios::out | ios::binary | ios::trunc);
+				if (!theFile) {
+					cout << "Could not open output.txt for writing!";
+					waitforenter();
+					exit(1);
+				}
 
-				if((ibytessent = send(s1,szbuffer,ibufferlen,0))==SOCKET_ERROR)
-					throw "error in send in server program\n";
-				else cout << "Echo message:" << szbuffer << endl;  
+				cout << "About to receive a " << len << "-byte file." << endl;
+				//Now we know how many bytes to read.
+				unsigned long bytes_read = 0;
+				while (bytes_read < len) {
+					ibytesrecv = recv(s1, szbuffer, min(128, len - bytes_read), 0);
+					bytes_read += ibytesrecv;
+					if (ibytesrecv == SOCKET_ERROR) {
+						cout << "Warning: Could not read part of the payload data." << endl;
+					}
+					theFile.write(szbuffer, ibytesrecv);
+				}
+				theFile.close();
+				cout << "All bytes received, sending acknowledgement to client..." << endl;
+
+				if ((ibytessent = send(s1, "OK", 3, 0)) == SOCKET_ERROR) {
+					cout << "error in send in server program\n";
+				}
+				else cout << "File transferred successfully." << endl;
 
 			}//wait loop
 
@@ -196,6 +229,7 @@ union {struct sockaddr generic;
 
 		/* When done uninstall winsock.dll (WSACleanup()) and exit */ 
 		WSACleanup();
+		waitforenter();
 		return 0;
 	}
 

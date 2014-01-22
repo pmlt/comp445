@@ -23,6 +23,11 @@ char* getmessage(char *);
 
 #include <windows.h>
 
+#include <conio.h>
+#include <fstream>
+#include <sys/stat.h>
+#include <direct.h>
+
 using namespace std;
 
 //user defined port number
@@ -91,7 +96,11 @@ DWORD dwtest;
  char    sin_zero[8];
  }; */
 
-
+void waitforenter() {
+	_getch();
+	//int ch;
+	//while (((ch = getchar()) != '\n') && (ch != EOF)) /* void */;
+}
 int main(void){
 
 	WSADATA wsadata;
@@ -123,6 +132,28 @@ int main(void){
 		if((hp=gethostbyname(localhost)) == NULL) 
 			throw "gethostbyname failed\n";
 
+		//Ask name of file to upload
+
+		char cwd[255];
+		_getcwd(cwd, 255);
+		cout << "Current directory: " << cwd << endl;
+		cout << "Please enter the name of the file to upload :" << flush;
+		char filename[80];
+		cin >> filename;
+		struct stat stats;
+		if (stat(filename, &stats) != 0) {
+			cout << "File does not exist or cannot be stat!" << endl;
+			waitforenter();
+			exit(1);
+		}
+		ifstream theFile(filename, ios::in | ios::binary);
+		if (!theFile) {
+			cout << "Could not open " << filename << " for reading!" << endl;
+			waitforenter();
+			exit(1);
+		}
+		cout << "About to transfer file " << filename << " (" << stats.st_size << " bytes)" << endl;
+
 		//Ask for name of remote server
 
 		cout << "please enter your remote server name :" << flush ;   
@@ -152,23 +183,37 @@ int main(void){
 		if (connect(s,(LPSOCKADDR)&sa_in,sizeof(sa_in)) == SOCKET_ERROR)
 			throw "connect failed\n";
 
-		/* Have an open connection, so, server is 
+		// We are ready to send data.
+		// First we send a twenty-byte header containing the size of the file
+		// in ASCII-encoded bytes.
 
-		   - waiting for the client request message
-		   - don't forget to append <carriage return> 
-		   - <line feed> characters after the send buffer to indicate end-of file */
-
-		//append client message to szbuffer + send.
-
-		sprintf_s(szbuffer,"hello world!\r\n"); 
-
-		ibytessent=0;    
-		ibufferlen = strlen(szbuffer);
-		ibytessent = send(s,szbuffer,ibufferlen,0);
-		if (ibytessent == SOCKET_ERROR)
-			throw "Send failed\n";  
-		else
-			cout << "Message to server: " << szbuffer;
+		// First, the header, which contains the payload size
+		cout << "Sending 20-byte header" << endl;
+		char header[21];
+		sprintf_s(header, "%020lu", stats.st_size);
+		ibytessent = send(s, header, 20, 0);
+		if (ibytessent == SOCKET_ERROR || ibytessent != 20) {
+			cout << "Warning: Only sent " << ibytessent << " of " << 20 << " bytes!" << endl;
+		}
+		cout << "Sending content of file in 128-byte chunks." << endl;
+		// Second, the payload data
+		size_t bytes_sent = 0;
+		while (bytes_sent < stats.st_size) {
+			size_t bytes_to_read = min(128, stats.st_size - bytes_sent);
+			theFile.read(szbuffer, bytes_to_read);
+			streamsize bytes_read = theFile.gcount();
+			if (bytes_read != bytes_to_read) {
+				cout << "Warning: Read " << bytes_read << " bytes instead of " << bytes_to_read << "..." << endl;
+				break;
+			}
+			ibytessent = send(s, szbuffer, bytes_read, 0);
+			if (ibytessent == SOCKET_ERROR || ibytessent != bytes_read) {
+				cout << "Warning: Could not send part of payload." << endl;
+			}
+			bytes_sent += bytes_read;
+		}
+		theFile.close();
+		cout << "File sent; waiting for acknowledgement from server..." << endl;
 
 		//wait for reception of server response.
 		ibytesrecv=0; 
@@ -187,7 +232,8 @@ int main(void){
 	closesocket(s);
 
 	/* When done uninstall winsock.dll (WSACleanup()) and exit */ 
-	WSACleanup();  
+	WSACleanup();
+	waitforenter();
 	return 0;
 }
 
