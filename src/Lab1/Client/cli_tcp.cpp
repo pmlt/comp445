@@ -27,6 +27,7 @@ char* getmessage(char *);
 #include <fstream>
 #include <sys/stat.h>
 #include <direct.h>
+#include "StreamSocketSender.h"
 
 using namespace std;
 
@@ -184,34 +185,8 @@ int main(void){
 			throw "connect failed\n";
 
 		// We are ready to send data.
-		// First we send a twenty-byte header containing the size of the file
-		// in ASCII-encoded bytes.
-
-		// First, the header, which contains the payload size
-		cout << "Sending 20-byte header" << endl;
-		char header[21];
-		sprintf_s(header, "%020lu", stats.st_size);
-		ibytessent = send(s, header, 20, 0);
-		if (ibytessent == SOCKET_ERROR || ibytessent != 20) {
-			cout << "Warning: Only sent " << ibytessent << " of " << 20 << " bytes!" << endl;
-		}
-		cout << "Sending content of file in 128-byte chunks." << endl;
-		// Second, the payload data
-		size_t bytes_sent = 0;
-		while (bytes_sent < stats.st_size) {
-			size_t bytes_to_read = min(128, stats.st_size - bytes_sent);
-			theFile.read(szbuffer, bytes_to_read);
-			streamsize bytes_read = theFile.gcount();
-			if (bytes_read != bytes_to_read) {
-				cout << "Warning: Read " << bytes_read << " bytes instead of " << bytes_to_read << "..." << endl;
-				break;
-			}
-			ibytessent = send(s, szbuffer, bytes_read, 0);
-			if (ibytessent == SOCKET_ERROR || ibytessent != bytes_read) {
-				cout << "Warning: Could not send part of payload." << endl;
-			}
-			bytes_sent += bytes_read;
-		}
+		StreamSocketSender sender(128); //Send chunks of 128 bytes
+		sender.send(s, theFile, stats.st_size);
 		theFile.close();
 		cout << "File sent; waiting for acknowledgement from server..." << endl;
 
