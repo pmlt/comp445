@@ -12,6 +12,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cli_tcp.cpp" />
+    <ClCompile Include="FileTransferProtocolClient.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="FileTransferProtocolClient.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E67002C0-9309-43F7-A059-F4F79C54E48E}</ProjectGuid>
