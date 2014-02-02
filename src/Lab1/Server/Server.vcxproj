@@ -68,10 +68,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FileTransferProtocolServer.cpp" />
+    <ClCompile Include="FTPThread.cpp" />
     <ClCompile Include="ser_tcp.cpp" />
+    <ClCompile Include="Thread.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FileTransferProtocolServer.h" />
+    <ClInclude Include="FTPThread.h" />
+    <ClInclude Include="Thread.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

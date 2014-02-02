@@ -17,9 +17,7 @@
 #include <windows.h>
 #include <conio.h>
 #include <direct.h>
-
-#include "FileTransferProtocolServer.h"
-
+#include "FTPThread.h"
 
 using namespace std;
 
@@ -155,7 +153,7 @@ union {struct sockaddr generic;
 			FD_ZERO(&readfds);
 
 			//wait loop
-
+			FTPThread *t;
 			while(1)
 			{
 
@@ -173,11 +171,12 @@ union {struct sockaddr generic;
 					throw "Couldn't accept connection\n";
 
 				//Connection request accepted.
-				cout<<"accepted connection from "<<inet_ntoa(ca.ca_in.sin_addr)<<":"
-					<<hex<<htons(ca.ca_in.sin_port)<<endl;
+				cout << "accepted connection from " << inet_ntoa(ca.ca_in.sin_addr) << ":"
+					<< hex << htons(ca.ca_in.sin_port) << endl;
 
-				FileTransferProtocolServer server(".");
-				server.serve(s1);
+				// Spin a new thread to serve this client
+				t = new FTPThread(s1);
+				t->start();
 			}//wait loop
 
 		} //try loop
