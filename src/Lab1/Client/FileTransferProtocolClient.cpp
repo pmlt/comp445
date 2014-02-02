@@ -19,7 +19,6 @@ FileTransferProtocolClient::~FileTransferProtocolClient()
 SOCKET FileTransferProtocolClient::connect(HOSTENT &remote)
 {
 	SOCKET s;
-	SOCKADDR_IN sa;         // filled by bind
 	SOCKADDR_IN sa_in;      // fill with server info, IP, port
 	int port = REQUEST_PORT;
 
@@ -45,10 +44,32 @@ SOCKET FileTransferProtocolClient::connect(HOSTENT &remote)
 	return s;
 }
 
+int FileTransferProtocolClient::list(SOCKET s)
+{
+	// First, send LIST command to server
+	if (-1 == sendCommand(s, 'L')) return -1;
+
+	// Wait for confirmation
+	if (-1 == waitForAck(s, "Server cannot list files at this time.")) return -1;
+
+	while(true) {
+		string filename;
+		if (-1 == recvFilename(s, filename)) {
+			onTransferError("Could not receive next filename in server list!");
+			return -1;
+		}
+		if (filename.compare("!ENDOFLIST!") == 0) break;
+
+		cout << "+ " << filename << endl;
+	}
+	cout << "Got ENDOFLIST marker." << endl;
+	return 0;
+}
+
 int FileTransferProtocolClient::send(SOCKET s, string filename, istream &file, size_t file_size) {
 
 	// First, inform server that we are sending a file
-	if (-1 == sendDirection(s, 'U')) return -1;
+	if (-1 == sendCommand(s, 'U')) return -1;
 
 	// Wait for confirmation
 	if (-1 == waitForAck(s, "Server cannot receive upload at this time.")) return -1;
@@ -59,7 +80,7 @@ int FileTransferProtocolClient::send(SOCKET s, string filename, istream &file, s
 	// Wait for confirmation
 	if (-1 == waitForAck(s, "Server did not accept filename.")) return -1;
 
-	onTransferBegin(filename);
+	onTransferBegin('U', filename);
 
 	//Finally, send the file.
 	StreamSocketSender sender(128); //Send chunks of 128 bytes
@@ -72,7 +93,7 @@ int FileTransferProtocolClient::send(SOCKET s, string filename, istream &file, s
 int FileTransferProtocolClient::receive(SOCKET s, string filename, ostream &file) {
 
 	// First, inform server that we are receiving a file
-	if (-1 == sendDirection(s, 'D')) return -1;
+	if (-1 == sendCommand(s, 'D')) return -1;
 
 	// Wait for confirmation
 	if (-1 == waitForAck(s, "Server cannot send a file at this time.")) return -1;
@@ -83,7 +104,7 @@ int FileTransferProtocolClient::receive(SOCKET s, string filename, ostream &file
 	// Wait for confirmation
 	if (-1 == waitForAck(s, "Error: this file does not exist or is unreadable.")) return -1;
 
-	onTransferBegin(filename);
+	onTransferBegin('D', filename);
 
 	// Finally, receive the file.
 	StreamSocketReceiver receiver(128);
@@ -94,43 +115,13 @@ int FileTransferProtocolClient::receive(SOCKET s, string filename, ostream &file
 	return 0;
 }
 
-int FileTransferProtocolClient::sendDirection(SOCKET s, char direction) {
-	int bytes_sent = ::send(s, &direction, 1, 0);
-	if (bytes_sent == SOCKET_ERROR || bytes_sent != 1) {
-		onTransferError("Could not send direction header!");
-		return -1;
-	}
+int FileTransferProtocolClient::quit(SOCKET s)
+{
+	if (-1 == sendCommand(s, 'Q')) return -1;
 	return 0;
 }
 
-int FileTransferProtocolClient::sendFilename(SOCKET s, string filename) {
-	int bytes_sent;
-	char fNameHeader[4];
-	sprintf_s(fNameHeader, "%03lu", (unsigned long)filename.size());
-	bytes_sent = ::send(s, fNameHeader, 3, 0);
-	if (bytes_sent == SOCKET_ERROR || bytes_sent != 3) {
-		onTransferError("Could not send filename size");
-		return -1;
-	}
-	bytes_sent = ::send(s, filename.c_str(), filename.size(), 0);
-	if (bytes_sent == SOCKET_ERROR || bytes_sent != filename.size()) {
-		onTransferError("Could not send filename");
-		return -1;
-	}
-	return 0;
-}
-
-int FileTransferProtocolClient::waitForAck(SOCKET s, string errmsg) {
-	char ackbuf[4] = "   "; // Either ACK or ERR
-	int bytes_received = recv(s, ackbuf, 3, 0);
-	if (bytes_received == SOCKET_ERROR || bytes_received != 3 || strcmp(ackbuf, "ERR") == 0) {
-		onTransferError(errmsg);
-		return -1;
-	}
-	return 0;
-}
-
-void FileTransferProtocolClient::onTransferBegin(string filename) {
+void FileTransferProtocolClient::onTransferBegin(char direction, string filename) {
 	cout << "Beginning transfer of file " << filename << endl;
 }
 void FileTransferProtocolClient::onTransferProgress(string filename, size_t bytes_transferred, size_t total_bytes) {

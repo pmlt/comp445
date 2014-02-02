@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include <sys/stat.h>
 #include <fstream>
+#include <windows.h>
 
 using namespace std;
 
@@ -18,11 +19,64 @@ FileTransferProtocolServer::~FileTransferProtocolServer()
 }
 
 int FileTransferProtocolServer::serve(SOCKET s) {
-	char direction;
-	string filename;
+	char command;
 
-	// First, wait for direction
-	if (-1 == recvDirection(s, direction)) return -1;
+	while (true) {
+		// First, wait for direction
+		if (-1 == recvCommand(s, command)) return -1;
+
+		// OK! At this point, the next action depends on the command received.
+		if (command == 'D') {
+			if (-1 == serveDownload(s)) return -1;
+		}
+		else if (command == 'U') {
+			if (-1 == serveUpload(s)) return -1;
+		}
+		else if (command == 'L') {
+			if (-1 == serveList(s)) return -1;
+		}
+		else if (command == 'Q') {
+			return 0;
+		}
+	}
+	return 0;
+}
+
+int FileTransferProtocolServer::serveList(SOCKET s) {
+	WIN32_FIND_DATA ffd;
+	HANDLE hFind;
+
+	hFind = FindFirstFile((this->docroot + "/*").c_str(), &ffd);
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		onTransferError("Could not list directory contents.");
+		sendErr(s);
+		return -1;
+	}
+	// Send ack
+	if (-1 == sendAck(s)) return -1;
+	do
+	{
+		if (!(ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+		{
+			// Only list files
+			if (-1 == sendFilename(s, ffd.cFileName)) {
+				FindClose(hFind);
+				return -1;
+			}
+		}
+	} while (FindNextFile(hFind, &ffd) != 0);
+	FindClose(hFind);
+
+	// Inform client that listing is done; 
+	// since ! is not a valid filename character, there cannot be a 
+	// conflict with the actual directory listing
+	if (-1 == sendFilename(s, "!ENDOFLIST!")) return -1;
+	return 0;
+}
+
+int FileTransferProtocolServer::serveUpload(SOCKET s) {
+	string filename;
 
 	// Send ack
 	if (-1 == sendAck(s)) return -1;
@@ -31,17 +85,6 @@ int FileTransferProtocolServer::serve(SOCKET s) {
 	if (-1 == recvFilename(s, filename)) return -1;
 	string filepath = this->docroot + "/" + filename;
 
-	// OK! At this point, the next action depends on the direction.
-	if (direction == 'D') {
-		return serveDownload(s, filename, filepath);
-	}
-	else if (direction == 'U') {
-		return serveUpload(s, filename, filepath);
-	}
-	return 0;
-}
-
-int FileTransferProtocolServer::serveUpload(SOCKET s, string filename, string filepath) {
 	// Receive the file from client.
 	ofstream file(filepath.c_str(), ios::out | ios::binary | ios::trunc);
 	if (!file) {
@@ -58,7 +101,16 @@ int FileTransferProtocolServer::serveUpload(SOCKET s, string filename, string fi
 	return 0;
 }
 
-int FileTransferProtocolServer::serveDownload(SOCKET s, string filename, string filepath) {
+int FileTransferProtocolServer::serveDownload(SOCKET s) {
+	string filename;
+
+	// Send ack
+	if (-1 == sendAck(s)) return -1;
+
+	// Second, wait for filename
+	if (-1 == recvFilename(s, filename)) return -1;
+	string filepath = this->docroot + "/" + filename;
+
 	// At this point, we should check if file exists
 	struct stat stats;
 	int statres = stat(filepath.c_str(), &stats);
@@ -69,7 +121,7 @@ int FileTransferProtocolServer::serveDownload(SOCKET s, string filename, string 
 		if (-1 == sendErr(s)) return -1;
 		return 0;
 	}
-	// Send the file to the client.
+	// Open file for reading
 	ifstream file(filepath.c_str(), ios::in | ios::binary);
 	if (!file) {
 		onTransferError("Could not open file for reading!");
@@ -82,72 +134,6 @@ int FileTransferProtocolServer::serveDownload(SOCKET s, string filename, string 
 	StreamSocketSender sender(128); //Send chunks of 128 bytes
 	sender.send(s, file, stats.st_size); // XXX catch exceptions and report progress as it goes along
 	onTransferComplete(filename);
-	return 0;
-}
-
-int FileTransferProtocolServer::recvDirection(SOCKET s, char &direction) {
-	char d;
-	int bytes_received;
-	bytes_received = recv(s, &d, 1, 0);
-	if (bytes_received == SOCKET_ERROR || bytes_received != 1) {
-		onTransferError("Could not receive direction from client!");
-		return -1;
-	}
-	if (d != 'D' && d != 'U') {
-		onTransferError("Client sent invalid direction!");
-		return -1;
-	}
-	direction = d;
-	return 0;
-}
-int FileTransferProtocolServer::recvFilename(SOCKET s, string &filename) {
-	int bytes_received;
-
-	// First, receive the filename size (3 bytes ascii-encoded unsigned integer)
-	char buf[3];
-	bytes_received = recv(s, buf, 3, 0);
-	if (bytes_received == SOCKET_ERROR || bytes_received != 3) {
-		onTransferError("Could not receive filename header size!");
-		return -1;
-	}
-
-	// Try to parse what we have received
-	size_t len;
-	if (EOF == sscanf_s(buf, "%3lu", &len)) {
-		onTransferError("Could not parse filename header size!");
-		return -1;
-	}
-
-	// Finally, allocate a string and receive the filename
-	char *nameBuf = (char*)malloc(len+1);
-	nameBuf[len] = '\0';
-	bytes_received = recv(s, nameBuf, len, 0);
-	if (bytes_received == SOCKET_ERROR || bytes_received != len) {
-		free(nameBuf);
-		onTransferError("Could not receive filename header!");
-	}
-
-	filename = string(nameBuf);
-	free(nameBuf);
-	return 0;
-}
-
-int FileTransferProtocolServer::sendAck(SOCKET s) {
-	char buf[3] = { 'A', 'C', 'K' };
-	int bytes_sent = ::send(s, buf, 3, 0);
-	if (bytes_sent == SOCKET_ERROR || bytes_sent != 3) {
-		onTransferError("Could not acknowledge client!");
-		return -1;
-	}
-	return 0;
-}
-int FileTransferProtocolServer::sendErr(SOCKET s) {
-	char buf[3] = { 'E', 'R', 'R' };
-	int bytes_sent = ::send(s, buf, 3, 0);
-	if (bytes_sent == SOCKET_ERROR || bytes_sent != 3) {
-		onTransferError("Could not send error notice to client!");
-		return -1;
-	}
 	return 0;
 }
 

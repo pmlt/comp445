@@ -1,10 +1,11 @@
 #pragma once
 #include <string>
 #include <WinSock2.h>
+#include "FileTransferProtocol.h"
 
 using namespace std;
 
-class FileTransferProtocolServer
+class FileTransferProtocolServer : FileTransferProtocol
 {
 private:
 	string docroot;
@@ -14,13 +15,9 @@ public:
 	~FileTransferProtocolServer();
 
 	int serve(SOCKET s);
-	int serveUpload(SOCKET s, string filename, string filepath);
-	int serveDownload(SOCKET s, string filename, string filepath);
-
-	int recvDirection(SOCKET s, char &direction);
-	int recvFilename(SOCKET s, string &filename);
-	int sendAck(SOCKET s);
-	int sendErr(SOCKET s);
+	int serveList(SOCKET s);
+	int serveUpload(SOCKET s);
+	int serveDownload(SOCKET s);
 
 	virtual void onTransferBegin(char direction, string filename);
 	virtual void onTransferProgress(string filename, size_t bytes_received, size_t total_bytes);

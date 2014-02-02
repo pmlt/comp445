@@ -119,6 +119,15 @@ int main(void){
 			if ((rp = gethostbyname(remotehost)) == NULL)
 				throw "remote gethostbyname failed\n";
 
+			FileTransferProtocolClient client;
+			s = client.connect(*rp);
+			if (s == INVALID_SOCKET || s == SOCKET_ERROR) {
+				cout << "Could not connect to remote server!" << endl;
+				continue;
+			}
+			cout << "Files available on this server: " << endl;
+			client.list(s);
+
 			//Ask name of file to upload
 			cout << "Type name of file to be transferred: " << flush;
 			char filename[80];
@@ -137,15 +146,8 @@ int main(void){
 				}
 
 				//We are ready to receive data.
-				FileTransferProtocolClient receiver;
-				s = receiver.connect(*rp);
-				if (s == INVALID_SOCKET || s == SOCKET_ERROR) {
-					cout << "Could not connect to remote server!" << endl;
-					continue;
-				}
-				receiver.receive(s, filename, theFile);
+				client.receive(s, filename, theFile);
 				theFile.close();
-				closesocket(s);
 			}
 			else if (strcmp("put", direction) == 0) {
 				//Check if file exists
@@ -162,21 +164,14 @@ int main(void){
 				cout << "About to transfer file " << filename << " (" << stats.st_size << " bytes)" << endl;
 
 				// We are ready to send data.
-				FileTransferProtocolClient sender;
-				s = sender.connect(*rp);
-				if (s == INVALID_SOCKET || s == SOCKET_ERROR) {
-					cout << "Could not connect to remote server!" << endl;
-					continue;
-				}
-				sender.send(s, filename, theFile, stats.st_size);
+				client.send(s, filename, theFile, stats.st_size);
 				theFile.close();
-				closesocket(s);
 			}
 			else {
 				cout << "Invalid direction (either put or get)" << endl;
-				continue;
 			}
-
+			client.quit(s);
+			closesocket(s);
 		}
 	} // try loop
 
