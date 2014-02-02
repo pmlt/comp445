@@ -16,8 +16,9 @@
 #include <fstream>
 #include <windows.h>
 #include <conio.h>
+#include <direct.h>
 
-#include "StreamSocketReceiver.h"
+#include "FileTransferProtocolServer.h"
 
 
 using namespace std;
@@ -110,18 +111,22 @@ union {struct sockaddr generic;
 					<< "wsadata.szSystemStatus " << wsadata.szSystemStatus << endl
 					<< "wsadata.iMaxSockets "    << wsadata.iMaxSockets    << endl
 					<< "wsadata.iMaxUdpDg "      << wsadata.iMaxUdpDg      << endl;
-			}  
+			}
 
 			//Display info of local host
 
 			gethostname(localhost,10);
-			cout<<"hostname: "<<localhost<< endl;
+			cout<<"FTP server hostname: "<<localhost<< endl;
 
 			if((hp=gethostbyname(localhost)) == NULL) {
 				cout << "gethostbyname() cannot get local host info?"
 					<< WSAGetLastError() << endl; 
 				exit(1);
 			}
+
+			char cwd[255];
+			_getcwd(cwd, 255);
+			cout << "Serving directory: " << cwd << endl;
 
 			//Create the server socket
 			if((s = socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET) 
@@ -171,24 +176,8 @@ union {struct sockaddr generic;
 				cout<<"accepted connection from "<<inet_ntoa(ca.ca_in.sin_addr)<<":"
 					<<hex<<htons(ca.ca_in.sin_port)<<endl;
 
-				ofstream theFile("output.txt", ios::out | ios::binary | ios::trunc);
-				if (!theFile) {
-					cout << "Could not open output.txt for writing!";
-					waitforenter();
-					exit(1);
-				}
-				// Ready to receive data.
-				StreamSocketReceiver receiver(128);
-				receiver.receive(s1, theFile);
-
-				theFile.close();
-				cout << "All bytes received, sending acknowledgement to client..." << endl;
-
-				if ((ibytessent = send(s1, "OK", 3, 0)) == SOCKET_ERROR) {
-					cout << "error in send in server program\n";
-				}
-				else cout << "File transferred successfully." << endl;
-
+				FileTransferProtocolServer server(".");
+				server.serve(s1);
 			}//wait loop
 
 		} //try loop

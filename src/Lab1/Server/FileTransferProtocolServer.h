@@ -14,6 +14,8 @@ public:
 	~FileTransferProtocolServer();
 
 	int serve(SOCKET s);
+	int serveUpload(SOCKET s, string filename, string filepath);
+	int serveDownload(SOCKET s, string filename, string filepath);
 
 	int recvDirection(SOCKET s, char &direction);
 	int recvFilename(SOCKET s, string &filename);

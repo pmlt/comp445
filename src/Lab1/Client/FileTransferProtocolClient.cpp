@@ -2,6 +2,10 @@
 #include "StreamSocketSender.h"
 #include "StreamSocketReceiver.h"
 #include <WinSock2.h>
+#include <iostream>
+
+//user defined port number
+#define REQUEST_PORT 0x7070;
 
 FileTransferProtocolClient::FileTransferProtocolClient()
 {
@@ -12,7 +16,36 @@ FileTransferProtocolClient::~FileTransferProtocolClient()
 {
 }
 
-int FileTransferProtocolClient::send(SOCKET s, string filename, istream file, size_t file_size) {
+SOCKET FileTransferProtocolClient::connect(HOSTENT &remote)
+{
+	SOCKET s;
+	SOCKADDR_IN sa;         // filled by bind
+	SOCKADDR_IN sa_in;      // fill with server info, IP, port
+	int port = REQUEST_PORT;
+
+	//Create the socket
+	if ((s = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) return INVALID_SOCKET;
+	/* For UDP protocol replace SOCK_STREAM with SOCK_DGRAM */
+
+	//Specify server address for client to connect to server.
+	memset(&sa_in, 0, sizeof(sa_in));
+	memcpy(&sa_in.sin_addr, remote.h_addr, remote.h_length);
+	sa_in.sin_family = remote.h_addrtype;
+	sa_in.sin_port = htons(port);
+
+	//Display the host machine internet address
+
+	//cout << "Connecting to remote host:";
+	//cout << inet_ntoa(sa_in.sin_addr) << endl;
+
+	//Connect Client to the server
+	if (::connect(s, (LPSOCKADDR)&sa_in, sizeof(sa_in)) == SOCKET_ERROR)
+		return SOCKET_ERROR;
+	
+	return s;
+}
+
+int FileTransferProtocolClient::send(SOCKET s, string filename, istream &file, size_t file_size) {
 
 	// First, inform server that we are sending a file
 	if (-1 == sendDirection(s, 'U')) return -1;
@@ -36,7 +69,7 @@ int FileTransferProtocolClient::send(SOCKET s, string filename, istream file, si
 	return 0;
 }
 
-int FileTransferProtocolClient::receive(SOCKET s, string filename, ostream file) {
+int FileTransferProtocolClient::receive(SOCKET s, string filename, ostream &file) {
 
 	// First, inform server that we are receiving a file
 	if (-1 == sendDirection(s, 'D')) return -1;
@@ -72,10 +105,10 @@ int FileTransferProtocolClient::sendDirection(SOCKET s, char direction) {
 
 int FileTransferProtocolClient::sendFilename(SOCKET s, string filename) {
 	int bytes_sent;
-	char fNameHeader[3];
+	char fNameHeader[4];
 	sprintf_s(fNameHeader, "%03lu", (unsigned long)filename.size());
-	bytes_sent = ::send(s, fNameHeader, sizeof fNameHeader, 0);
-	if (bytes_sent == SOCKET_ERROR || bytes_sent != sizeof fNameHeader) {
+	bytes_sent = ::send(s, fNameHeader, 3, 0);
+	if (bytes_sent == SOCKET_ERROR || bytes_sent != 3) {
 		onTransferError("Could not send filename size");
 		return -1;
 	}
@@ -89,8 +122,8 @@ int FileTransferProtocolClient::sendFilename(SOCKET s, string filename) {
 
 int FileTransferProtocolClient::waitForAck(SOCKET s, string errmsg) {
 	char ackbuf[4] = "   "; // Either ACK or ERR
-	int bytes_received = recv(s, ackbuf, sizeof ackbuf, 0);
-	if (bytes_received == SOCKET_ERROR || bytes_received != sizeof ackbuf || strcmp(ackbuf, "ERR") == 0) {
+	int bytes_received = recv(s, ackbuf, 3, 0);
+	if (bytes_received == SOCKET_ERROR || bytes_received != 3 || strcmp(ackbuf, "ERR") == 0) {
 		onTransferError(errmsg);
 		return -1;
 	}
@@ -98,14 +131,14 @@ int FileTransferProtocolClient::waitForAck(SOCKET s, string errmsg) {
 }
 
 void FileTransferProtocolClient::onTransferBegin(string filename) {
-
+	cout << "Beginning transfer of file " << filename << endl;
 }
 void FileTransferProtocolClient::onTransferProgress(string filename, size_t bytes_transferred, size_t total_bytes) {
-
+	cout << filename << ": " << bytes_transferred << " of " << total_bytes << "bytes (" << (int)((bytes_transferred / total_bytes) * 100) << "%)" << endl;
 }
 void FileTransferProtocolClient::onTransferComplete(string filename) {
-
+	cout << filename << " transferred!" << endl;
 }
 void FileTransferProtocolClient::onTransferError(string error) {
-
+	cout << "An error occured during transfer: " << error << endl;
 }

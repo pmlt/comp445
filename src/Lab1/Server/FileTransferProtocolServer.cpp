@@ -31,43 +31,57 @@ int FileTransferProtocolServer::serve(SOCKET s) {
 	if (-1 == recvFilename(s, filename)) return -1;
 	string filepath = this->docroot + "/" + filename;
 
-	// At this point, we should check if file exists
-	struct stat stats;
-	int file_exists = stat(filepath.c_str(), &stats) != 0;
-
-
 	// OK! At this point, the next action depends on the direction.
 	if (direction == 'D') {
-		if (!file_exists) {
-			onTransferError("Client requested invalid file, closing connection...");
-			if (-1 == sendErr(s)) return -1;
-			return 0;
-		}
-		// Send the file to the client.
-		ifstream file(filepath.c_str(), ios::in | ios::binary);
-		if (!file) {
-			onTransferError("Could not open file for reading!");
-			if (-1 == sendErr(s)) return -1;
-			return -1;
-		}
-		// Ready to send file, informing client...
-		if (-1 == sendAck(s)) return -1;
-		StreamSocketSender sender(128); //Send chunks of 128 bytes
-		sender.send(s, file, stats.st_size); // XXX catch exceptions and report progress as it goes along
+		return serveDownload(s, filename, filepath);
 	}
 	else if (direction == 'U') {
-		// Receive the file from client.
-		ofstream file(filepath.c_str(), ios::out | ios::binary | ios::trunc);
-		if (!file) {
-			onTransferError("Could not open file for writing!");
-			if (-1 == sendErr(s)) return -1;
-			return -1;
-		}
-		// Ready to receive file, informing client...
-		if (-1 == sendAck(s)) return -1;
-		StreamSocketReceiver receiver(128); //Receive chunks of 128 bytes
-		receiver.receive(s, file); // XXX catch exceptions and report progress as it goes along
+		return serveUpload(s, filename, filepath);
 	}
+	return 0;
+}
+
+int FileTransferProtocolServer::serveUpload(SOCKET s, string filename, string filepath) {
+	// Receive the file from client.
+	ofstream file(filepath.c_str(), ios::out | ios::binary | ios::trunc);
+	if (!file) {
+		onTransferError("Could not open file for writing!");
+		if (-1 == sendErr(s)) return -1;
+		return -1;
+	}
+	// Ready to receive file, informing client...
+	if (-1 == sendAck(s)) return -1;
+	onTransferBegin('U', filename);
+	StreamSocketReceiver receiver(128); //Receive chunks of 128 bytes
+	receiver.receive(s, file); // XXX catch exceptions and report progress as it goes along
+	onTransferComplete(filename);
+	return 0;
+}
+
+int FileTransferProtocolServer::serveDownload(SOCKET s, string filename, string filepath) {
+	// At this point, we should check if file exists
+	struct stat stats;
+	int statres = stat(filepath.c_str(), &stats);
+	if (statres == -1) {
+		char err[255];
+		strerror_s(err, 255, errno);
+		onTransferError(err);
+		if (-1 == sendErr(s)) return -1;
+		return 0;
+	}
+	// Send the file to the client.
+	ifstream file(filepath.c_str(), ios::in | ios::binary);
+	if (!file) {
+		onTransferError("Could not open file for reading!");
+		if (-1 == sendErr(s)) return -1;
+		return -1;
+	}
+	// Ready to send file, informing client...
+	if (-1 == sendAck(s)) return -1;
+	onTransferBegin('D', filename);
+	StreamSocketSender sender(128); //Send chunks of 128 bytes
+	sender.send(s, file, stats.st_size); // XXX catch exceptions and report progress as it goes along
+	onTransferComplete(filename);
 	return 0;
 }
 
@@ -91,8 +105,8 @@ int FileTransferProtocolServer::recvFilename(SOCKET s, string &filename) {
 
 	// First, receive the filename size (3 bytes ascii-encoded unsigned integer)
 	char buf[3];
-	bytes_received = recv(s, buf, 20, 0);
-	if (bytes_received == SOCKET_ERROR) {
+	bytes_received = recv(s, buf, 3, 0);
+	if (bytes_received == SOCKET_ERROR || bytes_received != 3) {
 		onTransferError("Could not receive filename header size!");
 		return -1;
 	}
@@ -105,15 +119,15 @@ int FileTransferProtocolServer::recvFilename(SOCKET s, string &filename) {
 	}
 
 	// Finally, allocate a string and receive the filename
-	char *nameBuf = (char*)malloc(len);
+	char *nameBuf = (char*)malloc(len+1);
+	nameBuf[len] = '\0';
 	bytes_received = recv(s, nameBuf, len, 0);
 	if (bytes_received == SOCKET_ERROR || bytes_received != len) {
 		free(nameBuf);
 		onTransferError("Could not receive filename header!");
 	}
 
-	filename.resize(len);
-	filename.copy(nameBuf, len, 0);
+	filename = string(nameBuf);
 	free(nameBuf);
 	return 0;
 }
@@ -139,18 +153,23 @@ int FileTransferProtocolServer::sendErr(SOCKET s) {
 
 void FileTransferProtocolServer::onTransferBegin(char direction, string filename)
 {
-
+	if (direction == 'U') {
+		cout << "Receiving " << filename << " from client..." << endl;
+	}
+	else {
+		cout << "Sending " << filename << " to client..." << endl;
+	}
 }
 
-void FileTransferProtocolServer::onTransferProgress(string filename, size_t bytes_received, size_t total_bytes)
+void FileTransferProtocolServer::onTransferProgress(string filename, size_t bytes_transferred, size_t total_bytes)
 {
-
+	cout << filename << ": " << bytes_transferred << " of " << total_bytes << "bytes (" << (int)((bytes_transferred / total_bytes) * 100) << "%)" << endl;
 }
 void FileTransferProtocolServer::onTransferComplete(string filename)
 {
-
+	cout << filename << " transferred!" << endl;
 }
 void FileTransferProtocolServer::onTransferError(string error)
 {
-
+	cout << "An error occured during transfer: " << error << endl;
 }

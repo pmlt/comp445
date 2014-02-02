@@ -12,8 +12,10 @@ public:
 	FileTransferProtocolClient();
 	~FileTransferProtocolClient();
 
-	int send(SOCKET s, string filename, istream file, size_t file_size);
-	int receive(SOCKET s, string filename, ostream file);
+	SOCKET connect(HOSTENT &remote);
+
+	int send(SOCKET s, string filename, istream &file, size_t file_size);
+	int receive(SOCKET s, string filename, ostream &file);
 
 	int sendDirection(SOCKET s, char direction);
 	int sendFilename(SOCKET s, string filename);

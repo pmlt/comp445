@@ -27,53 +27,20 @@ char* getmessage(char *);
 #include <fstream>
 #include <sys/stat.h>
 #include <direct.h>
-#include "StreamSocketSender.h"
+#include "FileTransferProtocolClient.h"
 
 using namespace std;
 
-//user defined port number
-#define REQUEST_PORT 0x7070;
-
-int port=REQUEST_PORT;
-
-
-
 //socket data types
 SOCKET s;
-SOCKADDR_IN sa;         // filled by bind
-SOCKADDR_IN sa_in;      // fill with server info, IP, port
 
-
-
-//buffer data types
-char szbuffer[128];
-
-char *buffer;
-
-int ibufferlen=0;
-
-int ibytessent;
-int ibytesrecv=0;
-
-
+char localhost[11],
+     remotehost[11],
+	 direction[11];
 
 //host data types
 HOSTENT *hp;
 HOSTENT *rp;
-
-char localhost[11],
-     remotehost[11];
-
-
-//other
-
-HANDLE test;
-
-DWORD dwtest;
-
-
-
-
 
 //reference for used structures
 
@@ -111,8 +78,8 @@ int main(void){
 		if (WSAStartup(0x0202,&wsadata)!=0){  
 			cout<<"Error in starting WSAStartup()" << endl;
 		} else {
-			buffer="WSAStartup was successful\n";   
-			WriteFile(test,buffer,sizeof(buffer),&dwtest,NULL); 
+			//buffer="WSAStartup was successful\n";   
+			//WriteFile(test,buffer,sizeof(buffer),&dwtest,NULL); 
 
 			/* Display the wsadata structure */
 			cout<< endl
@@ -133,79 +100,90 @@ int main(void){
 		if((hp=gethostbyname(localhost)) == NULL) 
 			throw "gethostbyname failed\n";
 
-		//Ask name of file to upload
-
 		char cwd[255];
 		_getcwd(cwd, 255);
 		cout << "Current directory: " << cwd << endl;
-		cout << "Please enter the name of the file to upload :" << flush;
-		char filename[80];
-		cin >> filename;
-		struct stat stats;
-		if (stat(filename, &stats) != 0) {
-			cout << "File does not exist or cannot be stat!" << endl;
-			waitforenter();
-			exit(1);
+
+		while (1) {
+
+			//Ask for name of remote server
+			cout << "Type name of FTP server (type \"quit\" to exit): " << flush;
+			cin >> remotehost;
+
+			if (strcmp("quit", remotehost) == 0) {
+				cout << "Quitting client..." << endl;
+				break;
+			}
+			cout << "Remote host name is: \"" << remotehost << "\"" << endl;
+
+			if ((rp = gethostbyname(remotehost)) == NULL)
+				throw "remote gethostbyname failed\n";
+
+			//Ask name of file to upload
+			cout << "Type name of file to be transferred: " << flush;
+			char filename[80];
+			cin >> filename;
+
+			//Ask direction
+			cout << "Type direction of transfer (put/get): " << flush;
+			cin >> direction;
+
+			if (strcmp("get", direction) == 0) {
+				//Check that we can open the file for writing
+				ofstream theFile(filename, ios::out | ios::binary | ios::trunc);
+				if (!theFile) {
+					cout << "Could not open " << filename << " for writing!" << endl;
+					continue;
+				}
+
+				//We are ready to receive data.
+				FileTransferProtocolClient receiver;
+				s = receiver.connect(*rp);
+				if (s == INVALID_SOCKET || s == SOCKET_ERROR) {
+					cout << "Could not connect to remote server!" << endl;
+					continue;
+				}
+				receiver.receive(s, filename, theFile);
+				theFile.close();
+				closesocket(s);
+			}
+			else if (strcmp("put", direction) == 0) {
+				//Check if file exists
+				struct stat stats;
+				if (stat(filename, &stats) != 0) {
+					cout << "File does not exist or cannot be stat!" << endl;
+					continue;
+				}
+				ifstream theFile(filename, ios::in | ios::binary);
+				if (!theFile) {
+					cout << "Could not open " << filename << " for reading!" << endl;
+					continue;
+				}
+				cout << "About to transfer file " << filename << " (" << stats.st_size << " bytes)" << endl;
+
+				// We are ready to send data.
+				FileTransferProtocolClient sender;
+				s = sender.connect(*rp);
+				if (s == INVALID_SOCKET || s == SOCKET_ERROR) {
+					cout << "Could not connect to remote server!" << endl;
+					continue;
+				}
+				sender.send(s, filename, theFile, stats.st_size);
+				theFile.close();
+				closesocket(s);
+			}
+			else {
+				cout << "Invalid direction (either put or get)" << endl;
+				continue;
+			}
+
 		}
-		ifstream theFile(filename, ios::in | ios::binary);
-		if (!theFile) {
-			cout << "Could not open " << filename << " for reading!" << endl;
-			waitforenter();
-			exit(1);
-		}
-		cout << "About to transfer file " << filename << " (" << stats.st_size << " bytes)" << endl;
-
-		//Ask for name of remote server
-
-		cout << "please enter your remote server name :" << flush ;   
-		cin >> remotehost ;
-		cout << "Remote host name is: \"" << remotehost << "\"" << endl;
-
-		if((rp=gethostbyname(remotehost)) == NULL)
-			throw "remote gethostbyname failed\n";
-
-		//Create the socket
-		if((s = socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET) 
-			throw "Socket failed\n";
-		/* For UDP protocol replace SOCK_STREAM with SOCK_DGRAM */
-
-		//Specify server address for client to connect to server.
-		memset(&sa_in,0,sizeof(sa_in));
-		memcpy(&sa_in.sin_addr,rp->h_addr,rp->h_length);
-		sa_in.sin_family = rp->h_addrtype;   
-		sa_in.sin_port = htons(port);
-
-		//Display the host machine internet address
-
-		cout << "Connecting to remote host:";
-		cout << inet_ntoa(sa_in.sin_addr) << endl;
-
-		//Connect Client to the server
-		if (connect(s,(LPSOCKADDR)&sa_in,sizeof(sa_in)) == SOCKET_ERROR)
-			throw "connect failed\n";
-
-		// We are ready to send data.
-		StreamSocketSender sender(128); //Send chunks of 128 bytes
-		sender.send(s, theFile, stats.st_size);
-		theFile.close();
-		cout << "File sent; waiting for acknowledgement from server..." << endl;
-
-		//wait for reception of server response.
-		ibytesrecv=0; 
-		if((ibytesrecv = recv(s,szbuffer,128,0)) == SOCKET_ERROR)
-			throw "Receive failed\n";
-		else
-			cout << "hip hip hoorah!: Successful message replied from server: " << szbuffer;      
-
 	} // try loop
 
 	//Display any needed error response.
-
 	catch (char *str) { cerr<<str<<":"<<dec<<WSAGetLastError()<<endl;}
 
-	//close the client socket
-	closesocket(s);
-
+	cleanup:
 	/* When done uninstall winsock.dll (WSACleanup()) and exit */ 
 	WSACleanup();
 	waitforenter();
