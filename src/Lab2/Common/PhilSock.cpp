@@ -1,8 +1,8 @@
 #include "PhilSock.h"
 #include <WinSock2.h>
 
-SOCKET net::socket(int af, int type, int protocol) {
-	SOCKET winsocket = ::socket(af, type, protocol);
+SOCKET net::socket(int af, int protocol) {
+	SOCKET winsocket = ::socket(af, SOCK_STREAM, protocol);
 	if (winsocket == INVALID_SOCKET) return winsocket;
 
 	state *ptr = (state*)malloc(sizeof(state));

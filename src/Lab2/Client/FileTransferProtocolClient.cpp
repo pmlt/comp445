@@ -24,7 +24,7 @@ SOCKET FileTransferProtocolClient::connect(HOSTENT &remote)
 	int port = REQUEST_PORT;
 
 	//Create the socket
-	if ((s = net::socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) return INVALID_SOCKET;
+	if ((s = net::socket(AF_INET, 0)) == INVALID_SOCKET) return INVALID_SOCKET;
 	/* For UDP protocol replace SOCK_STREAM with SOCK_DGRAM */
 
 	//Specify server address for client to connect to server.

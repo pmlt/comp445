@@ -127,7 +127,7 @@ union {struct sockaddr generic;
 			cout << "Serving directory: " << cwd << endl;
 
 			//Create the server socket
-			if((s = net::socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET) 
+			if((s = net::socket(AF_INET,0))==INVALID_SOCKET) 
 				throw "can't initialize socket";
 			// For UDP protocol replace SOCK_STREAM with SOCK_DGRAM 
 

@@ -8,7 +8,6 @@ namespace net {
 	
 	SOCKET socket(
 		int af,
-		int type,
 		int protocol);
 
 	int connect(
