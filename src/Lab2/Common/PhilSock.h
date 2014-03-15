@@ -8,15 +8,22 @@
 
 namespace net {
 	enum MSGTYPE {
-		INIT,   // Sent by client to initiate a connection
-		SYN,    // Server response to INIT
-		SYNACK, // Client response to SYN
-		ACK,    // Receiver response to a DATA packet
+		SYN,    // Client sends this to initialize connection
+		SYNACK, // Server response to SYN
+		ACK,    // Acknowledgement
 		DATA    // Datagram containing application data
 	};
 
 	struct state {
 		::SOCKET winsocket;
+		int af;
+		int protocol;
+
+		int this_seqno;
+		int dest_seqno;
+		sockaddr dest;
+		int dest_len;
+		dgram incoming_syn;
 	};
 
 	// Our datagram structure, with headers
@@ -50,12 +57,14 @@ namespace net {
 		struct sockaddr * addr,
 		int * addrlen);
 
+	// This will BLOCK until we have received ACK
 	int send(
 		SOCKET s,
 		const char * buf,
 		int len,
 		int flags);
 	
+	// This will BLOCK until we have received expected #
 	int recv(
 		SOCKET s,
 		char * buf,
@@ -75,17 +84,14 @@ namespace net {
 	int genSeqNo();
 	int nextSeqNo(int seqNo);
 
-	// Constructor for a INIT message
-	void init(dgram &d);
-
 	// Constructor for a SYN message
 	void syn(dgram &d);
 
 	// Constructor for a SYNACK message
-	void synack(dgram &d, int seqNo);
+	void synack(dgram &d, dgram prevsyn);
 
 	// Constructor for a ACK message
-	void ack(dgram &d, int seqNo);
+	void ack(dgram &d, dgram prev);
 
 	// Constructor for a DATA message
 	void data(dgram &d, int seqNo, size_t sz, void * buf);
