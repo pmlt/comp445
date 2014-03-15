@@ -2,7 +2,7 @@
 #include <WinSock2.h>
 
 SOCKET net::socket(int af, int protocol) {
-	SOCKET winsocket = ::socket(af, SOCK_STREAM, protocol);
+	SOCKET winsocket = ::socket(af, SOCK_DGRAM, protocol);
 	if (winsocket == INVALID_SOCKET) return winsocket;
 
 	state *ptr = (state*)malloc(sizeof(state));
@@ -12,6 +12,12 @@ SOCKET net::socket(int af, int protocol) {
 }
 
 int net::connect(SOCKET s, const struct sockaddr * name, int namelen) {
+	// Three-way handshake.
+	int seqNo = genSeqNo();
+	// Step 1: Send the sequence number to the server
+	dgram dinit;
+	init(dinit);
+
 	SOCKET winsocket = getwinsocket(s);
 	return ::connect(winsocket, name, namelen);
 }
@@ -55,4 +61,47 @@ int net::closesocket(SOCKET s) {
 SOCKET net::getwinsocket(SOCKET s) {
 	state *ptr = (state*)s;
 	return ptr->winsocket;
+}
+
+int net::genSeqNo() {
+	return (rand() / (SEQNO_MAX - SEQNO_MIN)) + SEQNO_MIN;
+}
+
+int net::nextSeqNo(int seqNo) {
+	return (seqNo + 1) & SEQNO_MASK;
+}
+
+void net::init(dgram &d) {
+	d.seqno = genSeqNo();
+	d.type = INIT;
+	d.size = 0;
+	d.payload = NULL;
+}
+
+void net::syn(dgram &d) {
+	d.seqno = genSeqNo();
+	d.type = SYN;
+	d.size = 0;
+	d.payload = NULL;
+}
+
+void net::synack(dgram &d, int seqNo) {
+	d.seqno = seqNo;
+	d.type = SYNACK;
+	d.size = 0;
+	d.payload = NULL;
+}
+
+void net::ack(dgram &d, int seqNo) {
+	d.seqno = seqNo;
+	d.type = ACK;
+	d.size = 0;
+	d.payload = NULL;
+}
+
+void net::data(dgram &d, int seqNo, size_t sz, void * buf) {
+	d.seqno = seqNo;
+	d.type = DATA;
+	d.size = sz;
+	d.payload = buf;
 }
