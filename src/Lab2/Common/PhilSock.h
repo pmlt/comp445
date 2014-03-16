@@ -1,10 +1,11 @@
 #pragma once
 #include <WinSock2.h>
 
+#define MAX_PAYLOAD_SIZE 1000 // Maximum payload size (in bytes)
 #define SEQNO_MIN   0
 #define SEQNO_MAX   255
 #define SEQNO_MASK  0x01 // This is how we define how many bits are in a sequence number.
-#define NET_TIMEOUT 300 // in milliseconds
+#define NET_TIMEOUT 300  // Time to wait for ACK in milliseconds
 
 namespace net {
 	enum MSGTYPE {
@@ -12,6 +13,14 @@ namespace net {
 		SYNACK, // Server response to SYN
 		ACK,    // Acknowledgement
 		DATA    // Datagram containing application data
+	};
+
+	// Our datagram structure, with headers
+	struct dgram {
+		int seqno;        // Sequence number
+		MSGTYPE type;     // The type of message
+		size_t size;      // How large is the payload (in bytes)
+		void * payload;   // Pointer to beginning of payload
 	};
 
 	struct state {
@@ -24,14 +33,6 @@ namespace net {
 		sockaddr dest;
 		int dest_len;
 		dgram incoming_syn;
-	};
-
-	// Our datagram structure, with headers
-	struct dgram {
-		int seqno;        // Sequence number
-		MSGTYPE type;     // The type of message
-		size_t size;      // How large is the payload (in bytes)
-		void * payload;   // Pointer to beginning of payload
 	};
 	
 	SOCKET socket(
