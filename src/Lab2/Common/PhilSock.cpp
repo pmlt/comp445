@@ -132,12 +132,13 @@ int net::send(SOCKET s, const char * buf, int len, int flags) {
 
 		// First, prepare packet
 		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
-		size_t pkt_size = sizeof(dgram)+pl_size;
+		size_t hdr_size = sizeof(dgram);
+		size_t pkt_size = hdr_size+pl_size;
 		char * packet = (char*)malloc(pkt_size);
 		// Initialize headers
-		data((dgram&)packet, st->this_seqno, pl_size, (void*)buf);
+		data((dgram*)packet, st->this_seqno, pl_size, (void*)buf);
 		//Copy payload data
-		memcpy(packet + sizeof(dgram), buf, pl_size);
+		memcpy(packet + hdr_size, buf, pl_size);
 
 		// The packet is ready to be sent.
 		while (true) {
@@ -260,9 +261,9 @@ void net::ack(dgram &d, dgram prev) {
 	d.payload = NULL;
 }
 
-void net::data(dgram &d, int seqNo, size_t sz, void * buf) {
-	d.seqno = seqNo;
-	d.type = DATA;
-	d.size = sz;
-	d.payload = buf;
+void net::data(dgram * d, int seqNo, size_t sz, void * buf) {
+	d->seqno = seqNo;
+	d->type = DATA;
+	d->size = sz;
+	d->payload = buf;
 }

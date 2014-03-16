@@ -95,5 +95,5 @@ namespace net {
 	void ack(dgram &d, dgram prev);
 
 	// Constructor for a DATA message
-	void data(dgram &d, int seqNo, size_t sz, void * buf);
+	void data(dgram * d, int seqNo, size_t sz, void * buf);
 }
