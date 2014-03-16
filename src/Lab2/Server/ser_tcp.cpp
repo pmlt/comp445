@@ -18,6 +18,7 @@
 #include <conio.h>
 #include <direct.h>
 #include "FTPThread.h"
+#include "FileTransferProtocolServer.h"
 
 using namespace std;
 
@@ -146,24 +147,24 @@ union {struct sockaddr generic;
 
 			//Successfull bind, now listen for client requests.
 
-			if(net::listen(s,10) == SOCKET_ERROR)
-				throw "couldn't  set up listen on socket: ";
-			else cout << "Listen was successful" << endl;
 
-			FD_ZERO(&readfds);
+			//FD_ZERO(&readfds);
 
 			//wait loop
-			FTPThread *t;
+			//FTPThread *t;
 			while(1)
 			{
+				if (net::listen(s, 10) == SOCKET_ERROR)
+					throw "couldn't  set up listen on socket: ";
+				else cout << "Listen was successful" << endl;
 
-				FD_SET(net::getwinsocket(s),&readfds);  //always check the listener
+				//FD_SET(net::getwinsocket(s),&readfds);  //always check the listener
 
-				if(!(outfds=select(infds,&readfds,NULL,NULL,tp))) {}
+				//if(!(outfds=select(infds,&readfds,NULL,NULL,tp))) {}
 
-				else if (outfds == SOCKET_ERROR) throw "failure in Select";
+				//else if (outfds == SOCKET_ERROR) throw "failure in Select";
 
-				else if (FD_ISSET(net::getwinsocket(s),&readfds))  cout << "got a connection request" << endl; 
+				//else if (FD_ISSET(net::getwinsocket(s),&readfds))  cout << "got a connection request" << endl; 
 
 				//Found a connection request, try to accept. 
 
@@ -174,9 +175,12 @@ union {struct sockaddr generic;
 				cout << "accepted connection from " << inet_ntoa(ca.ca_in.sin_addr) << ":"
 					<< hex << htons(ca.ca_in.sin_port) << endl;
 
+				FileTransferProtocolServer server(".");
+				server.serve(s1);
+				net::closesocket(s1);
 				// Spin a new thread to serve this client
-				t = new FTPThread(s1);
-				t->start();
+				//t = new FTPThread(s1);
+				//t->start();
 			}//wait loop
 
 		} //try loop
