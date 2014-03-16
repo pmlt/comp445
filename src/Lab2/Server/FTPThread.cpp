@@ -1,6 +1,7 @@
 #include "FTPThread.h"
 #include <iostream>
 #include "FileTransferProtocolServer.h"
+#include "PhilSock.h"
 
 FTPThread::FTPThread(SOCKET s)
 {
@@ -16,5 +17,5 @@ void FTPThread::run()
 {
 	FileTransferProtocolServer server(".");
 	server.serve(this->client);
-	closesocket(this->client);
+	net::closesocket(this->client);
 }
