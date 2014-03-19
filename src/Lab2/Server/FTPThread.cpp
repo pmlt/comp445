@@ -15,7 +15,7 @@ FTPThread::~FTPThread()
 
 void FTPThread::run()
 {
-	FileTransferProtocolServer server(".");
-	server.serve(this->client);
-	net::closesocket(this->client);
+	//FileTransferProtocolServer server(".");
+	//server.serve(this->client);
+	//net::closesocket(this->client);
 }

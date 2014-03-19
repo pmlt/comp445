@@ -2,7 +2,6 @@
 #include <WinSock2.h>
 #include <fstream>
 
-#define TRACE       1
 #define TRACEFILE   "trace.log"
 #define MAX_PAYLOAD_SIZE 1000 // Maximum payload size (in bytes)
 #define SEQNO_MIN   0
@@ -54,7 +53,7 @@ namespace net {
 		void data(dgram * d, int seqNo, size_t sz, void * buf);
 
 	public:
-		sockaddr dest;
+		sockaddr_in dest;
 		int dest_len;
 
 		Socket(int af, int protocol, bool trace);
@@ -70,13 +69,13 @@ namespace net {
 	class ClientSocket : public Socket {
 	public:
 		// Automatic connect on object creation
-		ClientSocket(int af, int protocol, bool trace, const struct sockaddr * name, int namelen);
+		ClientSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen);
 	};
 
 	class ServerSocket : public Socket {
 	public:
 		// Automatic bind on object creation
-		ServerSocket(int af, int protocol, bool trace, const struct sockaddr * name, int namelen);
+		ServerSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen);
 
 		void listen(int backlog);
 	};

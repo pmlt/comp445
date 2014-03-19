@@ -5,6 +5,8 @@
 #include "PhilSock.h"
 #include "FileTransferProtocol.h"
 
+#define TRACE 1
+
 using namespace std;
 
 class FileTransferProtocolClient : FileTransferProtocol
@@ -13,7 +15,7 @@ private:
 	net::ClientSocket socket;
 
 public:
-	FileTransferProtocolClient(const sockaddr * name, int namelen);
+	FileTransferProtocolClient(const sockaddr_in * name, int namelen);
 	~FileTransferProtocolClient();
 
 	int list();

@@ -5,7 +5,7 @@
 #include "PhilSock.h"
 #include <iostream>
 
-FileTransferProtocolClient::FileTransferProtocolClient(const sockaddr * name, int namelen) :
+FileTransferProtocolClient::FileTransferProtocolClient(const sockaddr_in * name, int namelen) :
 		socket(AF_INET, 0, TRACE, name, namelen)
 {
 }

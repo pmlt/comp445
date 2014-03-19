@@ -128,8 +128,8 @@ union {struct sockaddr generic;
 			cout << "Serving directory: " << cwd << endl;
 
 			//Create the server socket
-			if((s = net::socket(AF_INET,0))==INVALID_SOCKET) 
-				throw "can't initialize socket";
+			//if((s = net::socket(AF_INET,0))==INVALID_SOCKET) 
+			//	throw "can't initialize socket";
 			// For UDP protocol replace SOCK_STREAM with SOCK_DGRAM 
 
 
@@ -140,13 +140,10 @@ union {struct sockaddr generic;
 
 
 			//Bind the server port
-
-			if (net::bind(s,(LPSOCKADDR)&sa,sizeof(sa)) == SOCKET_ERROR)
-				throw "can't bind the socket";
+			FileTransferProtocolServer server(".", &sa, sizeof(sa));
 			cout << "Bind was successful" << endl;
 
 			//Successfull bind, now listen for client requests.
-
 
 			//FD_ZERO(&readfds);
 
@@ -154,9 +151,7 @@ union {struct sockaddr generic;
 			//FTPThread *t;
 			while(1)
 			{
-				if (net::listen(s, 10) == SOCKET_ERROR)
-					throw "couldn't  set up listen on socket: ";
-				else cout << "Listen was successful" << endl;
+				server.waitForClient();
 
 				//FD_SET(net::getwinsocket(s),&readfds);  //always check the listener
 
@@ -168,16 +163,15 @@ union {struct sockaddr generic;
 
 				//Found a connection request, try to accept. 
 
-				if((s1=net::accept(s,&ca.generic,&calen))==INVALID_SOCKET)
-					throw "Couldn't accept connection\n";
+				//if((s1=net::accept(s,&ca.generic,&calen))==INVALID_SOCKET)
+				//	throw "Couldn't accept connection\n";
 
 				//Connection request accepted.
-				cout << "accepted connection from " << inet_ntoa(ca.ca_in.sin_addr) << ":"
-					<< hex << htons(ca.ca_in.sin_port) << endl;
+				//cout << "accepted connection from " << inet_ntoa(ca.ca_in.sin_addr) << ":"
+				//	<< hex << htons(ca.ca_in.sin_port) << endl;
 
-				FileTransferProtocolServer server(".");
-				server.serve(s1);
-				net::closesocket(s1);
+				server.serve();
+				//net::closesocket(s1);
 				// Spin a new thread to serve this client
 				//t = new FTPThread(s1);
 				//t->start();
@@ -190,7 +184,7 @@ union {struct sockaddr generic;
 		catch(char* str) { cerr<<str<<WSAGetLastError()<<endl;}		
 
 		//close server socket
-		net::closesocket(s);
+		//net::closesocket(s);
 
 		/* When done uninstall winsock.dll (WSACleanup()) and exit */ 
 		WSACleanup();

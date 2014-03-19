@@ -132,7 +132,7 @@ int main(void){
 			cout << "Connecting to remote host:";
 			cout << inet_ntoa(sa_in.sin_addr) << endl;
 
-			FileTransferProtocolClient client((const sockaddr*)&sa_in, sizeof(sa_in));
+			FileTransferProtocolClient client(&sa_in, sizeof(sa_in));
 
 			cout << "Files available on this server: " << endl;
 			client.list();

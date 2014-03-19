@@ -1,11 +1,12 @@
 #include "PhilSock.h"
 #include <WinSock2.h>
+#include <iostream>
 
 net::Socket::Socket(int af, int protocol, bool trace) :
 		winsocket(::socket(af, SOCK_DGRAM, protocol)),
 		af(af),
 		protocol(protocol),
-		dest_len(sizeof(sockaddr_in)),
+		dest_len(sizeof(dest)),
 		this_seqno(0),
 		dest_seqno(0),
 		trace(trace),
@@ -77,7 +78,7 @@ int net::Socket::send(const char * buf, int len, int flags) {
 			//Each iteration of this loop equals to an attempt to send the packet.
 
 			// Send the packet
-			sendto(winsocket, packet, sizeof(dgram)+pl_size, 0, &dest, dest_len);
+			sendto(winsocket, packet, sizeof(dgram)+pl_size, 0, (const sockaddr *)&dest, dest_len);
 
 			// Wait for ACK
 			dgram _ack;
@@ -157,7 +158,7 @@ int net::Socket::recv(char * buf, int len, int flags) {
 	return bytes_received;
 }
 
-net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct sockaddr * name, int namelen) :
+net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen) :
 		Socket(af, protocol, trace) {
 
 	dest = *name;
@@ -169,7 +170,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 	syn(_syn);
 	this_seqno = _syn.seqno;
 	if (trace) tracefile << "CLIENT: Sending SYN message with Seq No " << _syn.seqno << "\n";
-	sendto(winsocket, (const char*)&_syn, sizeof(_syn), 0, name, namelen);
+	sendto(winsocket, (const char*)&_syn, sizeof(_syn), 0, (const sockaddr*)name, namelen);
 
 	// Step 2: Wait for SYNACK
 	while (true) {
@@ -194,15 +195,16 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 		if (trace) tracefile << "CLIENT: Acknowledging received SYNACK\n";
 		dgram _ack;
 		ack(_ack, _synack);
-		sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, name, namelen);
+		sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)name, namelen);
 
 		if (trace) tracefile << "CLIENT: Connection established!\n";
+		break;
 	}
 }
 
-net::ServerSocket::ServerSocket(int af, int protocol, bool trace, const struct sockaddr * name, int namelen):
+net::ServerSocket::ServerSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen):
 		Socket(af, protocol, trace) {
-	if (SOCKET_ERROR == ::bind(winsocket, name, namelen)) {
+	if (SOCKET_ERROR == ::bind(winsocket, (const sockaddr*)name, namelen)) {
 		throw new SocketException("Could not bind server socket!");
 	}
 }
@@ -212,7 +214,7 @@ void net::ServerSocket::listen(int backlog) {
 	dgram _syn, _synack, _ack;
 	while (true) {
 		if (trace) tracefile << "SERVER: Waiting for SYN message\n";
-		int recvbytes = recvfrom(winsocket, (char*)&_syn, sizeof(_syn), 0, &dest, &dest_len);
+		int recvbytes = recvfrom(winsocket, (char*)&_syn, sizeof(_syn), 0, (sockaddr*)&dest, &dest_len);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
@@ -233,7 +235,7 @@ void net::ServerSocket::listen(int backlog) {
 		// Send a SYNACK
 		synack(_synack, _syn);
 		if (trace) tracefile << "SERVER: Sending SYNACK with Seq No " << _synack.seqno << "\n";
-		sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, &dest, dest_len);
+		sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, (const sockaddr*)&dest, dest_len);
 
 		// Wait for ACK
 		if (trace) tracefile << "SERVER: Waitin for acknowledgement of SYNACK\n";
@@ -247,6 +249,9 @@ void net::ServerSocket::listen(int backlog) {
 		if (_ack.type != ACK) continue; //Throw away unexpected packet
 		break;
 	}
+
+	std::cout << "Accepted connection from " << inet_ntoa(dest.sin_addr) << ":"
+		 << std::hex << htons(dest.sin_port) << std::endl;
 
 	if (trace) tracefile << "SERVER: Received SYNACK acknowledgement, connection established!\n";
 }
