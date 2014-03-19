@@ -2,22 +2,24 @@
 
 #include <string>
 #include <iostream>
+#include "PhilSock.h"
 #include "FileTransferProtocol.h"
 
 using namespace std;
 
 class FileTransferProtocolClient : FileTransferProtocol
 {
+private:
+	net::ClientSocket socket;
+
 public:
-	FileTransferProtocolClient();
+	FileTransferProtocolClient(const sockaddr * name, int namelen);
 	~FileTransferProtocolClient();
 
-	SOCKET connect(HOSTENT &remote);
-
-	int list(SOCKET s);
-	int send(SOCKET s, string filename, istream &file, size_t file_size);
-	int receive(SOCKET s, string filename, ostream &file);
-	int quit(SOCKET s);
+	int list();
+	int send(string filename, istream &file, size_t file_size);
+	int receive(string filename, ostream &file);
+	int quit();
 
 	virtual void onTransferBegin(char direction, string filename);
 	virtual void onTransferProgress(string filename, size_t bytes_transferred, size_t total_bytes);

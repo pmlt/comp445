@@ -67,13 +67,13 @@ namespace net {
 		int recv(char * buf, int len, int flags);
 	};
 
-	class ClientSocket : Socket {
+	class ClientSocket : public Socket {
 	public:
 		// Automatic connect on object creation
 		ClientSocket(int af, int protocol, bool trace, const struct sockaddr * name, int namelen);
 	};
 
-	class ServerSocket : Socket {
+	class ServerSocket : public Socket {
 	public:
 		// Automatic bind on object creation
 		ServerSocket(int af, int protocol, bool trace, const struct sockaddr * name, int namelen);

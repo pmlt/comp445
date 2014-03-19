@@ -7,8 +7,6 @@
 
 char* getmessage(char *);
 
-
-
 /* send and receive codes between client and server */
 /* This is your basic WINSOCK shell */
 #pragma comment( linker, "/defaultlib:ws2_32.lib" )
@@ -28,6 +26,9 @@ char* getmessage(char *);
 #include <sys/stat.h>
 #include <direct.h>
 #include "FileTransferProtocolClient.h"
+
+//user defined port number
+#define REQUEST_PORT 0x7070;
 
 using namespace std;
 
@@ -119,14 +120,22 @@ int main(void){
 			if ((rp = gethostbyname(remotehost)) == NULL)
 				throw "remote gethostbyname failed\n";
 
-			FileTransferProtocolClient client;
-			s = client.connect(*rp);
-			if (s == INVALID_SOCKET || s == SOCKET_ERROR) {
-				cout << "Could not connect to remote server!" << endl;
-				continue;
-			}
+			//Specify server address for client to connect to server.
+			SOCKADDR_IN sa_in;      // fill with server info, IP, port
+			int port = REQUEST_PORT;
+			memset(&sa_in, 0, sizeof(sa_in));
+			memcpy(&sa_in.sin_addr, rp->h_addr, rp->h_length);
+			sa_in.sin_family = rp->h_addrtype;
+			sa_in.sin_port = htons(port);
+
+			//Display the host machine internet address
+			cout << "Connecting to remote host:";
+			cout << inet_ntoa(sa_in.sin_addr) << endl;
+
+			FileTransferProtocolClient client((const sockaddr*)&sa_in, sizeof(sa_in));
+
 			cout << "Files available on this server: " << endl;
-			client.list(s);
+			client.list();
 
 			//Ask name of file to upload
 			cout << "Type name of file to be transferred: " << flush;
@@ -146,7 +155,7 @@ int main(void){
 				}
 
 				//We are ready to receive data.
-				client.receive(s, filename, theFile);
+				client.receive(filename, theFile);
 				theFile.close();
 			}
 			else if (strcmp("put", direction) == 0) {
@@ -164,20 +173,19 @@ int main(void){
 				cout << "About to transfer file " << filename << " (" << stats.st_size << " bytes)" << endl;
 
 				// We are ready to send data.
-				client.send(s, filename, theFile, stats.st_size);
+				client.send(filename, theFile, stats.st_size);
 				theFile.close();
 			}
 			else {
 				cout << "Invalid direction (either put or get)" << endl;
 			}
-			client.quit(s);
+			client.quit();
 		}
 	} // try loop
 
 	//Display any needed error response.
 	catch (char *str) { cerr<<str<<":"<<dec<<WSAGetLastError()<<endl;}
 
-	cleanup:
 	/* When done uninstall winsock.dll (WSACleanup()) and exit */ 
 	WSACleanup();
 	waitforenter();
