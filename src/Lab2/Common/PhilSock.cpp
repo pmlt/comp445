@@ -10,7 +10,7 @@ net::Socket::Socket(int af, int protocol, bool trace) :
 		this_seqno(0),
 		dest_seqno(0),
 		trace(trace),
-		tracefile(TRACEFILE, std::ios::out)
+		tracefile(TRACEFILE, std::ios::out | std::ios::app)
 {
 	if (winsocket == INVALID_SOCKET) throw new SocketException("Could not initialize socket!");
 }
@@ -78,7 +78,7 @@ int net::Socket::send(const char * buf, int len, int flags) {
 			//Each iteration of this loop equals to an attempt to send the packet.
 
 			// Send the packet
-			sendto(winsocket, packet, sizeof(dgram)+pl_size, 0, (const sockaddr *)&dest, dest_len);
+			sendto(winsocket, packet, pkt_size, 0, (const sockaddr *)&dest, dest_len);
 
 			// Wait for ACK
 			dgram _ack;
@@ -121,8 +121,9 @@ int net::Socket::recv(char * buf, int len, int flags) {
 	while (len > 0) {
 		if (trace) tracefile << "RECEIVER: Expecting packet #" << dest_seqno << "\n";
 		// Each iteration of this loop equals to a packet being received
+		size_t hdr_size = sizeof(dgram);
 		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
-		size_t pkt_size = sizeof(dgram)+pl_size;
+		size_t pkt_size = hdr_size+pl_size;
 		char *pkt = (char*)malloc(pkt_size);
 
 		while (true) {
@@ -143,12 +144,17 @@ int net::Socket::recv(char * buf, int len, int flags) {
 			// Check that it is of the correct sequence number
 			if (pkt_header->seqno != dest_seqno) continue;
 
+			// We got the packet; send ACK
+			dgram _ack;
+			ack(_ack, *pkt_header);
+			sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)&dest, dest_len);
+
 			break;
 		}
 		// This is our packet! Copy into output buffer, increment sequence numbers, free memory, etc.
 		this_seqno = nextSeqNo(this_seqno);
 		dest_seqno = nextSeqNo(dest_seqno);
-		memcpy(buf, pkt + sizeof(dgram), pl_size);
+		memcpy(buf, pkt + hdr_size, pl_size);
 		buf += pl_size;
 		len = max(0, len - pl_size);
 		free(pkt);
@@ -252,6 +258,9 @@ void net::ServerSocket::listen(int backlog) {
 
 	std::cout << "Accepted connection from " << inet_ntoa(dest.sin_addr) << ":"
 		 << std::hex << htons(dest.sin_port) << std::endl;
+
+	this_seqno = nextSeqNo(this_seqno);
+	dest_seqno = nextSeqNo(_synack.seqno);
 
 	if (trace) tracefile << "SERVER: Received SYNACK acknowledgement, connection established!\n";
 }
