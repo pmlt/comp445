@@ -54,7 +54,7 @@ int FileTransferProtocolClient::send(string filename, istream &file, size_t file
 	onTransferBegin('U', filename);
 
 	//Finally, send the file.
-	StreamSocketSender sender(128); //Send chunks of 128 bytes
+	StreamSocketSender sender(1024); //Send chunks of 1024 bytes
 	sender.send(socket, file, file_size); // XXX catch exceptions and report progress as it goes along
 
 	onTransferComplete(filename);
@@ -78,7 +78,7 @@ int FileTransferProtocolClient::receive(string filename, ostream &file) {
 	onTransferBegin('D', filename);
 
 	// Finally, receive the file.
-	StreamSocketReceiver receiver(128);
+	StreamSocketReceiver receiver(1024); //Receive in chunks of 1024 bytes
 	receiver.receive(socket, file); // XXX catch exceptions and report progress as it goes along
 
 	onTransferComplete(filename);

@@ -10,7 +10,7 @@ net::Socket::Socket(int af, int protocol, bool trace) :
 		this_seqno(0),
 		dest_seqno(0),
 		trace(trace),
-		tracefile(TRACEFILE, std::ios::out | std::ios::app)
+		tracefile(TRACEFILE, std::ios::out | std::ios::trunc)
 {
 	if (winsocket == INVALID_SOCKET) throw new SocketException("Could not initialize socket!");
 }

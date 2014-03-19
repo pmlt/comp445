@@ -100,7 +100,7 @@ int FileTransferProtocolServer::serveUpload() {
 	// Ready to receive file, informing client...
 	if (-1 == sendAck(socket)) return -1;
 	onTransferBegin('U', filename);
-	StreamSocketReceiver receiver(128); //Receive chunks of 128 bytes
+	StreamSocketReceiver receiver(1024); //Receive chunks of 1024 bytes
 	receiver.receive(socket, file); // XXX catch exceptions and report progress as it goes along
 	onTransferComplete(filename);
 	return 0;
@@ -136,7 +136,7 @@ int FileTransferProtocolServer::serveDownload() {
 	// Ready to send file, informing client...
 	if (-1 == sendAck(socket)) return -1;
 	onTransferBegin('D', filename);
-	StreamSocketSender sender(128); //Send chunks of 128 bytes
+	StreamSocketSender sender(1024); //Send chunks of 1024 bytes
 	sender.send(socket, file, stats.st_size); // XXX catch exceptions and report progress as it goes along
 	onTransferComplete(filename);
 	return 0;
