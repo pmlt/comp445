@@ -1,7 +1,7 @@
 #pragma once
 
 #include <iostream>
-#include <WinSock2.h>
+#include "PhilSock.h"
 
 using namespace std;
 
@@ -13,8 +13,8 @@ public:
 	StreamSocketReceiver(size_t packet_size);
 	~StreamSocketReceiver();
 
-	void receive(SOCKET s, ostream &stream);
-	size_t receiveHeader(SOCKET s);
-	void receivePayload(SOCKET s, ostream &stream, size_t len);
+	void receive(net::Socket &s, ostream &stream);
+	size_t receiveHeader(net::Socket &s);
+	void receivePayload(net::Socket &s, ostream &stream, size_t len);
 };
 

@@ -13,17 +13,17 @@ StreamSocketReceiver::~StreamSocketReceiver()
 {
 }
 
-void StreamSocketReceiver::receive(SOCKET s, ostream &stream)
+void StreamSocketReceiver::receive(net::Socket &s, ostream &stream)
 {
 	size_t len = this->receiveHeader(s);
 	this->receivePayload(s, stream, len);
 }
 
-size_t StreamSocketReceiver::receiveHeader(SOCKET s)
+size_t StreamSocketReceiver::receiveHeader(net::Socket &s)
 {
 	char buf[20];
 	size_t bytes_received;
-	if (bytes_received = net::recv(s, buf, 20, 0) == SOCKET_ERROR) {
+	if (bytes_received = s.recv(buf, 20, 0) == SOCKET_ERROR) {
 		throw IncompleteReceiveException(bytes_received, 20);
 	}
 
@@ -35,13 +35,13 @@ size_t StreamSocketReceiver::receiveHeader(SOCKET s)
 	return len;
 }
 
-void StreamSocketReceiver::receivePayload(SOCKET s, ostream &stream, size_t len)
+void StreamSocketReceiver::receivePayload(net::Socket &s, ostream &stream, size_t len)
 {
 	void *buf = malloc(this->packet_size);
 	size_t bytes_read = 0;
 	while (bytes_read < len) {
 		size_t exp_bytes = min(this->packet_size, len - bytes_read);
-		size_t bytes_recv = net::recv(s, (char*)buf, exp_bytes, 0);
+		size_t bytes_recv = s.recv((char*)buf, exp_bytes, 0);
 		if (bytes_recv == SOCKET_ERROR || bytes_recv != exp_bytes) {
 			free(buf);
 			throw IncompleteReceiveException(bytes_read + bytes_recv, len);

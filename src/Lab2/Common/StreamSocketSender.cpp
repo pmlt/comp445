@@ -1,6 +1,5 @@
 #include "StreamSocketSender.h"
 #include "IncompleteSendException.h"
-#include <WinSock2.h>
 #include "PhilSock.h"
 #include <iostream>
 #include <malloc.h>
@@ -15,23 +14,23 @@ StreamSocketSender::~StreamSocketSender()
 {
 }
 
-void StreamSocketSender::send(SOCKET s, istream &stream, size_t len)
+void StreamSocketSender::send(net::Socket &s, istream &stream, size_t len)
 {
 	this->sendHeader(s, len);
 	this->sendPayload(s, stream, len);
 }
 
-void StreamSocketSender::sendHeader(SOCKET s, size_t len)
+void StreamSocketSender::sendHeader(net::Socket &s, size_t len)
 {
 	char header[21];
 	sprintf_s(header, "%020lu", len);
-	size_t bytes_sent = net::send(s, header, 20, 0);
+	size_t bytes_sent = s.send(header, 20, 0);
 	if (bytes_sent == SOCKET_ERROR || bytes_sent != 20) {
 		throw IncompleteSendException(bytes_sent, 20);
 	}
 }
 
-void StreamSocketSender::sendPayload(SOCKET s, istream &strm, size_t len)
+void StreamSocketSender::sendPayload(net::Socket &s, istream &strm, size_t len)
 {
 	size_t bytes_sent = 0;
 	void *buf = malloc(this->packet_size);
@@ -44,7 +43,7 @@ void StreamSocketSender::sendPayload(SOCKET s, istream &strm, size_t len)
 			free(buf);
 			throw IncompleteSendException(bytes_sent, len);
 		}
-		size_t chunk_sent = net::send(s, (char*)buf, bytes_read, 0);
+		size_t chunk_sent = s.send((char*)buf, bytes_read, 0);
 		if (chunk_sent == SOCKET_ERROR || chunk_sent != bytes_read) {
 			free(buf);
 			throw IncompleteSendException(bytes_sent, len);
