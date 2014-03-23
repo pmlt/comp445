@@ -38,7 +38,6 @@ void net::Socket::syn(dgram &d) {
 	d.ack_seqno = 0;
 	d.type = SYN;
 	d.size = 0;
-	d.payload = NULL;
 }
 
 void net::Socket::synack(dgram &d, dgram acked) {
@@ -46,7 +45,6 @@ void net::Socket::synack(dgram &d, dgram acked) {
 	d.ack_seqno = acked.seqno;
 	d.type = SYNACK;
 	d.size = 0;
-	d.payload = NULL;
 }
 
 void net::Socket::ack(dgram &d, int seqNo, dgram acked) {
@@ -54,15 +52,13 @@ void net::Socket::ack(dgram &d, int seqNo, dgram acked) {
 	d.ack_seqno = acked.seqno;
 	d.type = ACK;
 	d.size = 0;
-	d.payload = NULL;
 }
 
-void net::Socket::data(dgram * d, int seqNo, size_t sz, void * buf) {
+void net::Socket::data(dgram * d, int seqNo, size_t sz) {
 	d->seqno = seqNo;
 	d->ack_seqno = 0;
 	d->type = DATA;
 	d->size = sz;
-	d->payload = buf;
 }
 
 int net::Socket::send(const char * buf, int len, int flags) {
@@ -79,7 +75,7 @@ int net::Socket::send(const char * buf, int len, int flags) {
 		size_t pkt_size = hdr_size + pl_size;
 		char * packet = (char*)malloc(pkt_size);
 		// Initialize headers
-		data((dgram*)packet, this_seqno, pl_size, (void*)buf);
+		data((dgram*)packet, this_seqno, pl_size);
 		//Copy payload data
 		memcpy(packet + hdr_size, buf, pl_size);
 
