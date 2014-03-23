@@ -96,6 +96,7 @@ int net::Socket::send(const char * buf, int len, int flags) {
 			if (recvbytes == SOCKET_ERROR) {
 				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 				// Some other error occured
+				traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
 				free(packet); // Don't leak
 				throw new SocketException("Could not receive ACK from other endpoint!");
 			}
@@ -150,6 +151,7 @@ int net::Socket::recv(char * buf, int len, int flags) {
 			int recvbytes = recv_dgram(pkt_header, pl_size, buf);
 			if (recvbytes == SOCKET_ERROR) {
 				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
+				traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
 				throw new SocketException("Could not receive DATA message from other endpoint!");
 			}
 			if (recvbytes < hdr_size) continue; //I don't know WHAT that is...
@@ -253,6 +255,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 	local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	// This is dumb, but the router requires that the client socket binds to a static port.
 	if (SOCKET_ERROR == ::bind(winsocket, (const sockaddr*)&local_addr, sizeof(local_addr))) {
+		traceError(WSAGetLastError(), "SOCKET_ERROR while binding");
 		throw new SocketException("Could not bind client socket!");
 	}
 
@@ -267,6 +270,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 	int sentbytes = sendto(winsocket, (const char*)&_syn, sizeof(dgram), 0, (const sockaddr*)name, namelen);
 	if (sentbytes == SOCKET_ERROR) {
 		std::cout << "Socket error: " << WSAGetLastError() << std::endl;
+		traceError(WSAGetLastError(), "SOCKET_ERROR while sendto");
 		throw new SocketException("Could not send SYN");
 	}
 
@@ -279,6 +283,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
+			traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
 			throw new SocketException("Could not receive SYNACK message from server!");
 		}
 		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
@@ -307,6 +312,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 net::ServerSocket::ServerSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen):
 		Socket(af, protocol, trace) {
 	if (SOCKET_ERROR == ::bind(winsocket, (const sockaddr*)name, namelen)) {
+		traceError(WSAGetLastError(), "SOCKET_ERROR while binding");
 		throw new SocketException("Could not bind server socket!");
 	}
 }
@@ -320,6 +326,7 @@ void net::ServerSocket::listen(int backlog) {
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
+			traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
 			throw new SocketException("Could not receive SYN from a client!");
 		}
 		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
@@ -345,6 +352,7 @@ void net::ServerSocket::listen(int backlog) {
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
+			traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
 			throw new SocketException("Could not receive SYNACK from client!");
 		}
 		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
@@ -374,4 +382,18 @@ void net::ServerSocket::listen(int backlog) {
 		tracefile << "  Client: " << dest_seqno << "\n";
 		tracefile << "  Server: " << this_seqno << "\n";
 	}
+}
+
+void net::Socket::traceError(int err, char *msg) {
+	LPSTR errString;
+	int errStringSize = FormatMessage(
+		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+		0,
+		err,
+		0,
+		(LPSTR)&errString,
+		0,
+		0);
+	if (trace) tracefile << msg << ": " << errString << std::endl;
+	LocalFree(errString);
 }
