@@ -65,6 +65,10 @@ namespace net {
 
 		// This will BLOCK until we have received expected #
 		int recv(char * buf, int len, int flags);
+
+		// Convenience methods
+		int send_ack(int seqNo, dgram acked);
+		int send_dgram(const dgram &pkt);
 	};
 
 	class ClientSocket : public Socket {

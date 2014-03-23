@@ -158,9 +158,7 @@ int net::Socket::recv(char * buf, int len, int flags) {
 			if (pkt_header->seqno != dest_seqno) continue;
 
 			// We got the packet; send ACK
-			dgram _ack;
-			ack(_ack, this_seqno, *pkt_header);
-			sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)&dest, dest_len);
+			send_ack(this_seqno, *pkt_header);
 
 			break;
 		}
@@ -175,6 +173,16 @@ int net::Socket::recv(char * buf, int len, int flags) {
 	}
 	if (trace) tracefile << "RECEIVER: Received " << bytes_received << " bytes!\n";
 	return bytes_received;
+}
+
+int net::Socket::send_ack(int seqNo, dgram acked) {
+	dgram _ack;
+	ack(_ack, seqNo, acked);
+	return send_dgram(_ack);
+}
+
+int net::Socket::send_dgram(const dgram &d) {
+	return sendto(winsocket, (const char*)&d, sizeof(d), 0, (const sockaddr*)&dest, dest_len);
 }
 
 net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen) :
@@ -207,12 +215,11 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 		if (trace) tracefile << "CLIENT: Received SYNACK with Seq No " << _synack.seqno << "\n";
 
 		// Step 3: Send ACK
-		dgram _ack;
-		ack(_ack, nextSeqNo(_syn.seqno), _synack);
-		if (trace) tracefile << "CLIENT: Sending ACK message with Seq No " << _ack.seqno << "\n";
-		sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)name, namelen);
+		int ack_seqno = nextSeqNo(_syn.seqno);
+		if (trace) tracefile << "CLIENT: Sending ACK message with Seq No " << ack_seqno << "\n";
+		send_ack(nextSeqNo(_syn.seqno), _synack);
 
-		this_seqno = nextSeqNo(_ack.seqno);
+		this_seqno = nextSeqNo(ack_seqno);
 		dest_seqno = nextSeqNo(_synack.seqno);
 
 		break;
