@@ -1,6 +1,9 @@
+#define _CRT_RAND_S
+
 #include "PhilSock.h"
 #include <WinSock2.h>
 #include <iostream>
+#include <stdlib.h>
 
 net::Socket::Socket(int af, int protocol, bool trace) :
 		winsocket(::socket(af, SOCK_DGRAM, protocol)),
@@ -20,7 +23,10 @@ net::Socket::~Socket() {
 }
 
 int net::Socket::genSeqNo() {
-	return (rand() / (SEQNO_MAX - SEQNO_MIN)) + SEQNO_MIN;
+	unsigned int rnd, range(SEQNO_MAX - SEQNO_MIN), offset(SEQNO_MIN);
+	rand_s(&rnd);
+	rnd = (rnd % range) + offset;
+	return rnd;
 }
 
 int net::Socket::nextSeqNo(int seqNo) {
@@ -34,15 +40,15 @@ void net::Socket::syn(dgram &d) {
 	d.payload = NULL;
 }
 
-void net::Socket::synack(dgram &d, dgram prevsyn) {
+void net::Socket::synack(dgram &d) {
 	d.seqno = genSeqNo();
 	d.type = SYNACK;
 	d.size = 0;
 	d.payload = NULL;
 }
 
-void net::Socket::ack(dgram &d, dgram prev) {
-	d.seqno = prev.seqno;
+void net::Socket::ack(dgram &d, int seqNo) {
+	d.seqno = seqNo;
 	d.type = ACK;
 	d.size = 0;
 	d.payload = NULL;
@@ -146,7 +152,7 @@ int net::Socket::recv(char * buf, int len, int flags) {
 
 			// We got the packet; send ACK
 			dgram _ack;
-			ack(_ack, *pkt_header);
+			ack(_ack, this_seqno);
 			sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)&dest, dest_len);
 
 			break;
@@ -174,7 +180,6 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 	// Step 1: Send the sequence number to the server
 	dgram _syn;
 	syn(_syn);
-	this_seqno = _syn.seqno;
 	if (trace) tracefile << "CLIENT: Sending SYN message with Seq No " << _syn.seqno << "\n";
 	sendto(winsocket, (const char*)&_syn, sizeof(_syn), 0, (const sockaddr*)name, namelen);
 
@@ -194,17 +199,22 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 
 		if (trace) tracefile << "CLIENT: Received SYNACK with Seq No " << _synack.seqno << "\n";
 
-		this_seqno = nextSeqNo(this_seqno);
-		dest_seqno = nextSeqNo(_synack.seqno);
-
 		// Step 3: Send ACK
-		if (trace) tracefile << "CLIENT: Acknowledging received SYNACK\n";
 		dgram _ack;
-		ack(_ack, _synack);
+		ack(_ack, nextSeqNo(_syn.seqno));
+		if (trace) tracefile << "CLIENT: Sending ACK message with Seq No " << _ack.seqno << "\n";
 		sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)name, namelen);
 
-		if (trace) tracefile << "CLIENT: Connection established!\n";
+		this_seqno = nextSeqNo(_ack.seqno);
+		dest_seqno = nextSeqNo(_synack.seqno);
+
 		break;
+	}
+	if (trace) {
+		tracefile << "CLIENT: Connection established!\n";
+		tracefile << "Next sequence numbers will be:\n";
+		tracefile << "  Client: " << this_seqno << "\n";
+		tracefile << "  Server: " << dest_seqno << "\n";
 	}
 }
 
@@ -231,7 +241,7 @@ void net::ServerSocket::listen(int backlog) {
 
 		break;
 	}
-	dest_seqno = _syn.seqno;
+	dest_seqno = nextSeqNo(_syn.seqno);
 
 	if (trace) tracefile << "SERVER: Received SYN with Seq No " << _syn.seqno << "\n";
 	
@@ -239,12 +249,12 @@ void net::ServerSocket::listen(int backlog) {
 
 	while (true) {
 		// Send a SYNACK
-		synack(_synack, _syn);
+		synack(_synack);
 		if (trace) tracefile << "SERVER: Sending SYNACK with Seq No " << _synack.seqno << "\n";
 		sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, (const sockaddr*)&dest, dest_len);
 
 		// Wait for ACK
-		if (trace) tracefile << "SERVER: Waitin for acknowledgement of SYNACK\n";
+		if (trace) tracefile << "SERVER: Waiting for acknowledgement of SYNACK\n";
 		int recvbytes = recvfrom(winsocket, (char*)&_ack, sizeof(_ack), 0, 0, 0);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
@@ -253,14 +263,22 @@ void net::ServerSocket::listen(int backlog) {
 		}
 		if (recvbytes != sizeof(_ack)) continue; // Throw away unexpected packet
 		if (_ack.type != ACK) continue; //Throw away unexpected packet
+		if (_ack.seqno != dest_seqno) continue; // Throw away out-of-sync packet
+
+		if (trace) tracefile << "SERVER: Received ACK with Seq No " << _ack.seqno << "\n";
 		break;
 	}
 
-	std::cout << "Accepted connection from " << inet_ntoa(dest.sin_addr) << ":"
+	tracefile << "Accepted connection from " << inet_ntoa(dest.sin_addr) << ":"
 		 << std::hex << htons(dest.sin_port) << std::endl;
 
-	this_seqno = nextSeqNo(this_seqno);
-	dest_seqno = nextSeqNo(_synack.seqno);
+	this_seqno = nextSeqNo(_synack.seqno);
+	dest_seqno = nextSeqNo(_ack.seqno);
 
-	if (trace) tracefile << "SERVER: Received SYNACK acknowledgement, connection established!\n";
+	if (trace) {
+		tracefile << "SERVER: Received SYNACK acknowledgement, connection established!\n";
+		tracefile << "Next sequence numbers will be:\n";
+		tracefile << "  Client: " << dest_seqno << "\n";
+		tracefile << "  Server: " << this_seqno << "\n";
+	}
 }

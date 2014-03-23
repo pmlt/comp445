@@ -44,10 +44,10 @@ namespace net {
 		void syn(dgram &d);
 
 		// Constructor for a SYNACK message
-		void synack(dgram &d, dgram prevsyn);
+		void synack(dgram &d);
 
 		// Constructor for a ACK message
-		void ack(dgram &d, dgram prev);
+		void ack(dgram &d, int seqNo);
 
 		// Constructor for a DATA message
 		void data(dgram * d, int seqNo, size_t sz, void * buf);
