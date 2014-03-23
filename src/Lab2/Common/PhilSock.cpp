@@ -15,7 +15,11 @@ net::Socket::Socket(int af, int protocol, bool trace) :
 		trace(trace),
 		tracefile(TRACEFILE, std::ios::out | std::ios::trunc)
 {
+	unsigned long nonblocking = 1;
 	if (winsocket == INVALID_SOCKET) throw new SocketException("Could not initialize socket!");
+	if (0 != ioctlsocket(winsocket, FIONBIO, &nonblocking)) {
+		throw new SocketException("Could not set socket to non-blocking mode!");
+	}
 }
 
 net::Socket::~Socket() {
@@ -143,8 +147,9 @@ int net::Socket::recv(char * buf, int len, int flags) {
 		while (true) {
 
 			// Each iteration of this loop equals to an attempt to receive a packet.
-			size_t recvbytes = recv_dgram(pkt_header, pl_size, buf);
+			int recvbytes = recv_dgram(pkt_header, pl_size, buf);
 			if (recvbytes == SOCKET_ERROR) {
+				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 				throw new SocketException("Could not receive DATA message from other endpoint!");
 			}
 			if (recvbytes < hdr_size) continue; //I don't know WHAT that is...
@@ -181,15 +186,45 @@ int net::Socket::recv(char * buf, int len, int flags) {
 	return bytes_received;
 }
 
-int net::Socket::recv_dgram(dgram &header, size_t pl_size, void *payload) {
+int net::Socket::recv_dgram(dgram &header, size_t pl_size, void *payload, bool acceptDest) {
+	fd_set fds;
+	int n;
+	struct timeval tv;
+	tv.tv_sec = NET_TIMEOUT / 1000;
+	tv.tv_usec = NET_TIMEOUT * 1000;
+
+	FD_ZERO(&fds);
+	FD_SET(winsocket, &fds);
+
+	// Wait till we get a signal from select()
+	n = select(winsocket, &fds, NULL, NULL, &tv);
+	if (n == 0) {
+		// Timed out!
+		WSASetLastError(WSAETIMEDOUT);
+		return SOCKET_ERROR;
+	}
+	else if (n == -1) {
+		// Some other error... hopefully WSA error is already set
+		return SOCKET_ERROR;
+	}
+
+	sockaddr *dst(NULL);
+	int *dst_l(NULL);
+
+	if (acceptDest) {
+		dst = (sockaddr*)&dest;
+		dst_l = &dest_len;
+	}
+
 	size_t hdr_size = sizeof(dgram);
 	if (pl_size == 0) {
-		return recvfrom(winsocket, (char*)&header, hdr_size, 0, NULL, NULL);
+		// No payload expected, no need to allocate memory
+		return recvfrom(winsocket, (char*)&header, hdr_size, 0, dst, dst_l);
 		// XXX Check sender!!
 	}
 	size_t pkt_size = hdr_size + pl_size;
 	char * pkt = (char*)malloc(pkt_size);
-	size_t recvbytes = recvfrom(winsocket, pkt, pkt_size, 0, NULL, NULL);
+	size_t recvbytes = recvfrom(winsocket, pkt, pkt_size, 0, dst, dst_l);
 	// XXX Check sender!!
 	if (recvbytes >= hdr_size) {
 		header = *(dgram*)pkt; // Copy header bytes into dgram
@@ -207,7 +242,7 @@ int net::Socket::send_ack(int seqNo, dgram acked) {
 }
 
 int net::Socket::send_dgram(const dgram &d) {
-	return sendto(winsocket, (const char*)&d, sizeof(d), 0, (const sockaddr*)&dest, dest_len);
+	return sendto(winsocket, (const char*)&d, sizeof(dgram), 0, (const sockaddr*)&dest, dest_len);
 }
 
 net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen) :
@@ -221,7 +256,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 	dgram _syn;
 	syn(_syn);
 	if (trace) tracefile << "CLIENT: Sending SYN message with Seq No " << _syn.seqno << "\n";
-	sendto(winsocket, (const char*)&_syn, sizeof(_syn), 0, (const sockaddr*)name, namelen);
+	sendto(winsocket, (const char*)&_syn, sizeof(dgram), 0, (const sockaddr*)name, namelen);
 
 	// Step 2: Wait for SYNACK
 	while (true) {
@@ -234,7 +269,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 			// Some other error occured
 			throw new SocketException("Could not receive SYNACK message from server!");
 		}
-		if (recvbytes < sizeof(_synack)) continue; // Throw away unexpected packet
+		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
 		if (_synack.type != SYNACK) continue; //Throw away unexpected packet
 
 		if (trace) tracefile << "CLIENT: Received SYNACK with Seq No " << _synack.seqno << "\n";
@@ -269,13 +304,13 @@ void net::ServerSocket::listen(int backlog) {
 	dgram _syn, _synack, _ack;
 	while (true) {
 		if (trace) tracefile << "SERVER: Waiting for SYN message\n";
-		int recvbytes = recvfrom(winsocket, (char*)&_syn, sizeof(_syn), 0, (sockaddr*)&dest, &dest_len);
+		int recvbytes = recv_dgram(_syn, 0, NULL, true);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
 			throw new SocketException("Could not receive SYN from a client!");
 		}
-		if (recvbytes < sizeof(_syn)) continue; // Throw away unexpected packet
+		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
 		if (_syn.type != SYN) continue; //Throw away unexpected packet
 
 		break;
@@ -290,7 +325,7 @@ void net::ServerSocket::listen(int backlog) {
 		// Send a SYNACK
 		synack(_synack, _syn);
 		if (trace) tracefile << "SERVER: Sending SYNACK with Seq No " << _synack.seqno << "\n";
-		sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, (const sockaddr*)&dest, dest_len);
+		sendto(winsocket, (const char*)&_synack, sizeof(dgram), 0, (const sockaddr*)&dest, dest_len);
 
 		// Wait for ACK
 		if (trace) tracefile << "SERVER: Waiting for acknowledgement of SYNACK\n";
@@ -300,11 +335,11 @@ void net::ServerSocket::listen(int backlog) {
 			// Some other error occured
 			throw new SocketException("Could not receive SYNACK from client!");
 		}
-		if (recvbytes < sizeof(_ack)) continue; // Throw away unexpected packet
+		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
 		if (_ack.type != ACK) {
 			if (_ack.type == SYN) {
 				// Client never got our SYNACK, must re-send it.
-				sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, (const sockaddr*)&dest, dest_len);
+				sendto(winsocket, (const char*)&_synack, sizeof(dgram), 0, (const sockaddr*)&dest, dest_len);
 			}
 			continue; //Throw away unexpected packet
 		}

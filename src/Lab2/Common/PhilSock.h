@@ -68,7 +68,7 @@ namespace net {
 		int recv(char * buf, int len, int flags);
 
 		// Convenience methods
-		int recv_dgram(dgram &pkt, size_t payload_size, void *payload);
+		int recv_dgram(dgram &pkt, size_t payload_size, void *payload, bool acceptDest = 0);
 		int send_dgram(const dgram &pkt);
 		int send_ack(int seqNo, dgram acked);
 	};
