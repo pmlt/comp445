@@ -34,6 +34,8 @@ namespace net {
 		int this_seqno;
 		int dest_seqno;
 
+		dgram lastAck;
+
 		bool trace;
 		std::ofstream tracefile;
 

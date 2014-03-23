@@ -97,7 +97,13 @@ int net::Socket::send(const char * buf, int len, int flags) {
 			}
 
 			//Check that this is indeed an ACK
-			if (_ack.type != ACK) continue;
+			if (_ack.type != ACK) {
+				if (_ack.type == DATA || _ack.type == SYNACK) {
+					// This is an old packet that should be re-acked.
+					send_ack(lastAck.seqno, _ack);
+				}
+				continue;
+			}
 
 			//Check that this is the expected sequence number
 			if (_ack.seqno != dest_seqno) continue;
@@ -148,10 +154,20 @@ int net::Socket::recv(char * buf, int len, int flags) {
 			dgram *pkt_header = (dgram*)pkt;
 
 			// Check that packet is a DATA packet
-			if (pkt_header->type != DATA) continue;
+			if (pkt_header->type != DATA) {
+				if (pkt_header->type == SYNACK) {
+					// This is an old SYNACK packet that must be re-acked.
+					send_ack(lastAck.seqno, *pkt_header);
+				}
+				continue;
+			}
 
 			// Check that it is of the correct sequence number
-			if (pkt_header->seqno != dest_seqno) continue;
+			if (pkt_header->seqno != dest_seqno) {
+				// This is an old DATA packet that must be re-acked
+				send_ack(lastAck.seqno, *pkt_header);
+				continue;
+			}
 
 			// We got the packet; send ACK
 			send_ack(this_seqno, *pkt_header);
@@ -172,9 +188,8 @@ int net::Socket::recv(char * buf, int len, int flags) {
 }
 
 int net::Socket::send_ack(int seqNo, dgram acked) {
-	dgram _ack;
-	ack(_ack, seqNo, acked);
-	return send_dgram(_ack);
+	ack(lastAck, seqNo, acked);
+	return send_dgram(lastAck);
 }
 
 int net::Socket::send_dgram(const dgram &d) {
@@ -205,7 +220,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 			// Some other error occured
 			throw new SocketException("Could not receive SYNACK message from server!");
 		}
-		if (recvbytes != sizeof(_synack)) continue; // Throw away unexpected packet
+		if (recvbytes < sizeof(_synack)) continue; // Throw away unexpected packet
 		if (_synack.type != SYNACK) continue; //Throw away unexpected packet
 
 		if (trace) tracefile << "CLIENT: Received SYNACK with Seq No " << _synack.seqno << "\n";
@@ -246,7 +261,7 @@ void net::ServerSocket::listen(int backlog) {
 			// Some other error occured
 			throw new SocketException("Could not receive SYN from a client!");
 		}
-		if (recvbytes != sizeof(_syn)) continue; // Throw away unexpected packet
+		if (recvbytes < sizeof(_syn)) continue; // Throw away unexpected packet
 		if (_syn.type != SYN) continue; //Throw away unexpected packet
 
 		break;
@@ -271,8 +286,14 @@ void net::ServerSocket::listen(int backlog) {
 			// Some other error occured
 			throw new SocketException("Could not receive SYNACK from client!");
 		}
-		if (recvbytes != sizeof(_ack)) continue; // Throw away unexpected packet
-		if (_ack.type != ACK) continue; //Throw away unexpected packet
+		if (recvbytes < sizeof(_ack)) continue; // Throw away unexpected packet
+		if (_ack.type != ACK) {
+			if (_ack.type == SYN) {
+				// Client never got our SYNACK, must re-send it.
+				sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, (const sockaddr*)&dest, dest_len);
+			}
+			continue; //Throw away unexpected packet
+		}
 		if (_ack.seqno != dest_seqno) continue; // Throw away out-of-sync packet
 		if (_ack.ack_seqno != _synack.seqno) continue; // This ACK is not for our SYNACK!
 
