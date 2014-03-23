@@ -25,6 +25,7 @@ char* getmessage(char *);
 #include <fstream>
 #include <sys/stat.h>
 #include <direct.h>
+#include <time.h>
 #include "FileTransferProtocolClient.h"
 
 //user defined port number
@@ -71,6 +72,8 @@ void waitforenter() {
 	//while (((ch = getchar()) != '\n') && (ch != EOF)) /* void */;
 }
 int main(void){
+
+	srand(time(NULL));
 
 	WSADATA wsadata;
 

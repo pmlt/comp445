@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <conio.h>
 #include <direct.h>
+#include <time.h>
 #include "FTPThread.h"
 #include "FileTransferProtocolServer.h"
 
@@ -92,6 +93,7 @@ union {struct sockaddr generic;
 		_getch();
 	}
 	int main(void){
+		srand(time(NULL));
 
 		WSADATA wsadata;
 
@@ -151,6 +153,7 @@ union {struct sockaddr generic;
 			//FTPThread *t;
 			while(1)
 			{
+				cout << "Waiting for new client...\n";
 				server.waitForClient();
 
 				//FD_SET(net::getwinsocket(s),&readfds);  //always check the listener
