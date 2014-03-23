@@ -35,20 +35,23 @@ int net::Socket::nextSeqNo(int seqNo) {
 
 void net::Socket::syn(dgram &d) {
 	d.seqno = genSeqNo();
+	d.ack_seqno = 0;
 	d.type = SYN;
 	d.size = 0;
 	d.payload = NULL;
 }
 
-void net::Socket::synack(dgram &d) {
+void net::Socket::synack(dgram &d, dgram acked) {
 	d.seqno = genSeqNo();
+	d.ack_seqno = acked.seqno;
 	d.type = SYNACK;
 	d.size = 0;
 	d.payload = NULL;
 }
 
-void net::Socket::ack(dgram &d, int seqNo) {
+void net::Socket::ack(dgram &d, int seqNo, dgram acked) {
 	d.seqno = seqNo;
+	d.ack_seqno = acked.seqno;
 	d.type = ACK;
 	d.size = 0;
 	d.payload = NULL;
@@ -56,6 +59,7 @@ void net::Socket::ack(dgram &d, int seqNo) {
 
 void net::Socket::data(dgram * d, int seqNo, size_t sz, void * buf) {
 	d->seqno = seqNo;
+	d->ack_seqno = 0;
 	d->type = DATA;
 	d->size = sz;
 	d->payload = buf;
@@ -101,6 +105,9 @@ int net::Socket::send(const char * buf, int len, int flags) {
 
 			//Check that this is the expected sequence number
 			if (_ack.seqno != dest_seqno) continue;
+
+			//Check that this ACK is ACKing our DATA packet specifically
+			if (_ack.ack_seqno != ((dgram*)packet)->seqno) continue;
 
 			// Packet was acknowledged!
 			break;
@@ -152,7 +159,7 @@ int net::Socket::recv(char * buf, int len, int flags) {
 
 			// We got the packet; send ACK
 			dgram _ack;
-			ack(_ack, this_seqno);
+			ack(_ack, this_seqno, *pkt_header);
 			sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)&dest, dest_len);
 
 			break;
@@ -201,7 +208,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 
 		// Step 3: Send ACK
 		dgram _ack;
-		ack(_ack, nextSeqNo(_syn.seqno));
+		ack(_ack, nextSeqNo(_syn.seqno), _synack);
 		if (trace) tracefile << "CLIENT: Sending ACK message with Seq No " << _ack.seqno << "\n";
 		sendto(winsocket, (const char*)&_ack, sizeof(_ack), 0, (const sockaddr*)name, namelen);
 
@@ -249,7 +256,7 @@ void net::ServerSocket::listen(int backlog) {
 
 	while (true) {
 		// Send a SYNACK
-		synack(_synack);
+		synack(_synack, _syn);
 		if (trace) tracefile << "SERVER: Sending SYNACK with Seq No " << _synack.seqno << "\n";
 		sendto(winsocket, (const char*)&_synack, sizeof(_synack), 0, (const sockaddr*)&dest, dest_len);
 
@@ -264,6 +271,7 @@ void net::ServerSocket::listen(int backlog) {
 		if (recvbytes != sizeof(_ack)) continue; // Throw away unexpected packet
 		if (_ack.type != ACK) continue; //Throw away unexpected packet
 		if (_ack.seqno != dest_seqno) continue; // Throw away out-of-sync packet
+		if (_ack.ack_seqno != _synack.seqno) continue; // This ACK is not for our SYNACK!
 
 		if (trace) tracefile << "SERVER: Received ACK with Seq No " << _ack.seqno << "\n";
 		break;

@@ -20,6 +20,7 @@ namespace net {
 	// Our datagram structure, with headers
 	struct dgram {
 		int seqno;        // Sequence number
+		int ack_seqno;    // For ACK and SYNACK messages; SeqNo of ACKed message
 		MSGTYPE type;     // The type of message
 		size_t size;      // How large is the payload (in bytes)
 		void * payload;   // Pointer to beginning of payload
@@ -44,10 +45,10 @@ namespace net {
 		void syn(dgram &d);
 
 		// Constructor for a SYNACK message
-		void synack(dgram &d);
+		void synack(dgram &d, dgram acked);
 
 		// Constructor for a ACK message
-		void ack(dgram &d, int seqNo);
+		void ack(dgram &d, int seqNo, dgram acked);
 
 		// Constructor for a DATA message
 		void data(dgram * d, int seqNo, size_t sz, void * buf);
