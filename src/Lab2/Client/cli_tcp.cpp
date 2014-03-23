@@ -29,8 +29,10 @@ char* getmessage(char *);
 #include "FileTransferProtocolClient.h"
 
 //user defined port number
-#define REQUEST_PORT 0x7070;
-#define LOCAL_PORT   0x7071
+#define REQUEST_PORT 7000
+#define LOCAL_PORT   5000
+//#define REQUEST_PORT 0x7070
+//#define LOCAL_PORT   0x7071
 
 using namespace std;
 

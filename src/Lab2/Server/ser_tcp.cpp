@@ -25,7 +25,8 @@ using namespace std;
 
 //port data types
 
-#define REQUEST_PORT 0x7070
+#define REQUEST_PORT 5001
+//#define REQUEST_PORT 0x7070
 
 int port=REQUEST_PORT;
 
