@@ -17,12 +17,13 @@ namespace net {
 		DATA    // Datagram containing application data
 	};
 
-	// Our datagram header structure
+	// Our datagram structure
 	struct dgram {
 		int seqno;        // Sequence number
 		int ack_seqno;    // For ACK and SYNACK messages; SeqNo of ACKed message
 		MSGTYPE type;     // The type of message
 		size_t size;      // How large is the payload (in bytes)
+		char payload[MAX_PAYLOAD_SIZE];
 	};
 
 	class Socket {
@@ -52,7 +53,7 @@ namespace net {
 		void ack(dgram &d, int seqNo, dgram acked);
 
 		// Constructor for a DATA message
-		void data(dgram * d, int seqNo, size_t sz);
+		void data(dgram &d, int seqNo, size_t sz, const char * payload);
 
 	public:
 		sockaddr_in dest;
@@ -68,7 +69,7 @@ namespace net {
 		int recv(char * buf, int len, int flags);
 
 		// Convenience methods
-		int recv_dgram(dgram &pkt, size_t payload_size, void *payload, bool acceptDest = 0);
+		int recv_dgram(dgram &pkt, bool acceptDest = 0);
 		int send_dgram(const dgram &pkt);
 		int send_ack(int seqNo, dgram acked);
 		void traceError(int err, char *msg);

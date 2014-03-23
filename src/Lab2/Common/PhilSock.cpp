@@ -58,11 +58,13 @@ void net::Socket::ack(dgram &d, int seqNo, dgram acked) {
 	d.size = 0;
 }
 
-void net::Socket::data(dgram * d, int seqNo, size_t sz) {
-	d->seqno = seqNo;
-	d->ack_seqno = 0;
-	d->type = DATA;
-	d->size = sz;
+void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
+	d.seqno = seqNo;
+	d.ack_seqno = 0;
+	d.type = DATA;
+	d.size = sz;
+	//Copy payload data
+	memcpy((void*)d.payload, payload, sz);
 }
 
 int net::Socket::send(const char * buf, int len, int flags) {
@@ -75,29 +77,25 @@ int net::Socket::send(const char * buf, int len, int flags) {
 
 		// First, prepare packet
 		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
-		size_t hdr_size = sizeof(dgram);
-		size_t pkt_size = hdr_size + pl_size;
-		char * packet = (char*)malloc(pkt_size);
+		size_t pkt_size = sizeof(dgram);
+		dgram packet;
 		// Initialize headers
-		data((dgram*)packet, this_seqno, pl_size);
-		//Copy payload data
-		memcpy(packet + hdr_size, buf, pl_size);
+		data(packet, this_seqno, pl_size, buf);
 
 		// The packet is ready to be sent.
 		while (true) {
 			//Each iteration of this loop equals to an attempt to send the packet.
 
 			// Send the packet
-			sendto(winsocket, packet, pkt_size, 0, (const sockaddr *)&dest, dest_len);
+			sendto(winsocket, (const char*)&packet, pkt_size, 0, (const sockaddr *)&dest, dest_len);
 
 			// Wait for ACK
 			dgram _ack;
-			int recvbytes = recv_dgram(_ack, 0, NULL);
+			int recvbytes = recv_dgram(_ack);
 			if (recvbytes == SOCKET_ERROR) {
 				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 				// Some other error occured
 				traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
-				free(packet); // Don't leak
 				throw new SocketException("Could not receive ACK from other endpoint!");
 			}
 
@@ -114,7 +112,7 @@ int net::Socket::send(const char * buf, int len, int flags) {
 			if (_ack.seqno != dest_seqno) continue;
 
 			//Check that this ACK is ACKing our DATA packet specifically
-			if (_ack.ack_seqno != ((dgram*)packet)->seqno) continue;
+			if (_ack.ack_seqno != packet.seqno) continue;
 
 			// Packet was acknowledged!
 			break;
@@ -122,7 +120,6 @@ int net::Socket::send(const char * buf, int len, int flags) {
 		// Packet is sent; increment sequence numbers, free memory and move on to next.
 		this_seqno = nextSeqNo(this_seqno);
 		dest_seqno = nextSeqNo(dest_seqno);
-		free(packet);
 		buf += pl_size;
 		len = max(0, len - pl_size);
 		bytes_sent += pl_size;
@@ -142,13 +139,12 @@ int net::Socket::recv(char * buf, int len, int flags) {
 		if (trace) tracefile << "RECEIVER: Expecting packet #" << dest_seqno << "\n";
 		// Each iteration of this loop equals to a packet being received
 		size_t hdr_size = sizeof(dgram);
-		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
-		dgram pkt_header;
+		dgram pkt;
 
 		while (true) {
 
 			// Each iteration of this loop equals to an attempt to receive a packet.
-			int recvbytes = recv_dgram(pkt_header, pl_size, buf);
+			int recvbytes = recv_dgram(pkt);
 			if (recvbytes == SOCKET_ERROR) {
 				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 				traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
@@ -157,38 +153,39 @@ int net::Socket::recv(char * buf, int len, int flags) {
 			if (recvbytes < hdr_size) continue; //I don't know WHAT that is...
 
 			// Check that packet is a DATA packet
-			if (pkt_header.type != DATA) {
-				if (pkt_header.type == SYNACK) {
+			if (pkt.type != DATA) {
+				if (pkt.type == SYNACK) {
 					// This is an old SYNACK packet that must be re-acked.
-					send_ack(lastAck.seqno, pkt_header);
+					send_ack(lastAck.seqno, pkt);
 				}
 				continue;
 			}
 
 			// Check that it is of the correct sequence number
-			if (pkt_header.seqno != dest_seqno) {
+			if (pkt.seqno != dest_seqno) {
 				// This is an old DATA packet that must be re-acked
-				send_ack(lastAck.seqno, pkt_header);
+				send_ack(lastAck.seqno, pkt);
 				continue;
 			}
 
 			// We got the packet; send ACK
-			send_ack(this_seqno, pkt_header);
+			send_ack(this_seqno, pkt);
 
 			break;
 		}
 		// This is our packet! Increment sequence numbers, move buffer pointer, etc.
 		this_seqno = nextSeqNo(this_seqno);
 		dest_seqno = nextSeqNo(dest_seqno);
-		buf += pl_size;
-		len = max(0, len - pl_size);
-		bytes_received += pl_size;
+		memcpy(buf, pkt.payload, pkt.size); // Copy payload bytes into buffer
+		buf += pkt.size;
+		len = max(0, len - pkt.size);
+		bytes_received += pkt.size;
 	}
 	if (trace) tracefile << "RECEIVER: Received " << bytes_received << " bytes!\n";
 	return bytes_received;
 }
 
-int net::Socket::recv_dgram(dgram &header, size_t pl_size, void *payload, bool acceptDest) {
+int net::Socket::recv_dgram(dgram &pkt, bool acceptDest) {
 	fd_set fds;
 	int n;
 	struct timeval tv;
@@ -218,24 +215,24 @@ int net::Socket::recv_dgram(dgram &header, size_t pl_size, void *payload, bool a
 		dst_l = &dest_len;
 	}
 
-	size_t hdr_size = sizeof(dgram);
-	if (pl_size == 0) {
-		// No payload expected, no need to allocate memory
-		return recvfrom(winsocket, (char*)&header, hdr_size, 0, dst, dst_l);
-		// XXX Check sender!!
-	}
-	size_t pkt_size = hdr_size + pl_size;
-	char * pkt = (char*)malloc(pkt_size);
-	size_t recvbytes = recvfrom(winsocket, pkt, pkt_size, 0, dst, dst_l);
-	// XXX Check sender!!
-	if (recvbytes >= hdr_size) {
-		header = *(dgram*)pkt; // Copy header bytes into dgram
-	}
-	if (recvbytes == pkt_size) {
-		memcpy(payload, pkt + hdr_size, pl_size); // Copy payload bytes into buffer
-	}
-	free(pkt);
-	return recvbytes;
+	size_t pkt_size = sizeof(dgram);
+	return recvfrom(winsocket, (char*)&pkt, pkt_size, 0, dst, dst_l);
+
+	//if (pl_size == 0) {
+	//	// No payload expected, no need to allocate memory
+	//	return recvfrom(winsocket, (char*)&header, pkt_size, 0, dst, dst_l);
+	//	// XXX Check sender!!
+	//}
+	//size_t pkt_size = hdr_size + pl_size;
+	//char * pkt = (char*)malloc(pkt_size);
+	//// XXX Check sender!!
+	//if (recvbytes >= hdr_size) {
+	//	header = *(dgram*)pkt; // Copy header bytes into dgram
+	//}
+	//if (recvbytes == pkt_size) {
+	//}
+	//free(pkt);
+	//return recvbytes;
 }
 
 int net::Socket::send_ack(int seqNo, dgram acked) {
@@ -279,7 +276,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 		if (trace) tracefile << "CLIENT: Waiting for SYNACK message\n";
 
 		dgram _synack;
-		int recvbytes = recv_dgram(_synack, 0, NULL);
+		int recvbytes = recv_dgram(_synack);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
@@ -322,7 +319,7 @@ void net::ServerSocket::listen(int backlog) {
 	dgram _syn, _synack, _ack;
 	while (true) {
 		if (trace) tracefile << "SERVER: Waiting for SYN message\n";
-		int recvbytes = recv_dgram(_syn, 0, NULL, true);
+		int recvbytes = recv_dgram(_syn, true);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
@@ -348,7 +345,7 @@ void net::ServerSocket::listen(int backlog) {
 
 		// Wait for ACK
 		if (trace) tracefile << "SERVER: Waiting for acknowledgement of SYNACK\n";
-		int recvbytes = recv_dgram(_ack, 0, NULL);
+		int recvbytes = recv_dgram(_ack);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
