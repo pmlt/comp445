@@ -74,9 +74,11 @@ namespace net {
 	};
 
 	class ClientSocket : public Socket {
+	private:
+		sockaddr_in local_addr;
 	public:
 		// Automatic connect on object creation
-		ClientSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen);
+		ClientSocket(int af, int protocol, bool trace, int local_port, const struct sockaddr_in * name, int namelen);
 	};
 
 	class ServerSocket : public Socket {

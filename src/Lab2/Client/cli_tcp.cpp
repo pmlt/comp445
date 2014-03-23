@@ -30,6 +30,7 @@ char* getmessage(char *);
 
 //user defined port number
 #define REQUEST_PORT 0x7070;
+#define LOCAL_PORT   0x7071
 
 using namespace std;
 
@@ -135,7 +136,7 @@ int main(void){
 			cout << "Connecting to remote host:";
 			cout << inet_ntoa(sa_in.sin_addr) << endl;
 
-			FileTransferProtocolClient client(&sa_in, sizeof(sa_in));
+			FileTransferProtocolClient client(LOCAL_PORT, &sa_in, sizeof(sa_in));
 
 			cout << "Files available on this server: " << endl;
 			client.list();

@@ -245,8 +245,16 @@ int net::Socket::send_dgram(const dgram &d) {
 	return sendto(winsocket, (const char*)&d, sizeof(dgram), 0, (const sockaddr*)&dest, dest_len);
 }
 
-net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct sockaddr_in * name, int namelen) :
+net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port, const struct sockaddr_in * name, int namelen) :
 		Socket(af, protocol, trace) {
+
+	local_addr.sin_family = AF_INET;
+	local_addr.sin_port = htons(local_port);
+	local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	// This is dumb, but the router requires that the client socket binds to a static port.
+	if (SOCKET_ERROR == ::bind(winsocket, (const sockaddr*)&local_addr, sizeof(local_addr))) {
+		throw new SocketException("Could not bind client socket!");
+	}
 
 	dest = *name;
 	dest_len = namelen;
@@ -256,7 +264,11 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 	dgram _syn;
 	syn(_syn);
 	if (trace) tracefile << "CLIENT: Sending SYN message with Seq No " << _syn.seqno << "\n";
-	sendto(winsocket, (const char*)&_syn, sizeof(dgram), 0, (const sockaddr*)name, namelen);
+	int sentbytes = sendto(winsocket, (const char*)&_syn, sizeof(dgram), 0, (const sockaddr*)name, namelen);
+	if (sentbytes == SOCKET_ERROR) {
+		std::cout << "Socket error: " << WSAGetLastError() << std::endl;
+		throw new SocketException("Could not send SYN");
+	}
 
 	// Step 2: Wait for SYNACK
 	while (true) {

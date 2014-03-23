@@ -15,7 +15,7 @@ private:
 	net::ClientSocket socket;
 
 public:
-	FileTransferProtocolClient(const sockaddr_in * name, int namelen);
+	FileTransferProtocolClient(int local_port, const sockaddr_in * name, int namelen);
 	~FileTransferProtocolClient();
 
 	int list();
