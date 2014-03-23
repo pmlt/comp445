@@ -88,7 +88,7 @@ int net::Socket::send(const char * buf, int len, int flags) {
 
 			// Wait for ACK
 			dgram _ack;
-			int recvbytes = recvfrom(winsocket, (char*)&_ack, sizeof(_ack), 0, NULL, NULL);
+			int recvbytes = recv_dgram(_ack, 0, NULL);
 			if (recvbytes == SOCKET_ERROR) {
 				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 				// Some other error occured
@@ -138,53 +138,67 @@ int net::Socket::recv(char * buf, int len, int flags) {
 		// Each iteration of this loop equals to a packet being received
 		size_t hdr_size = sizeof(dgram);
 		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
-		size_t pkt_size = hdr_size+pl_size;
-		char *pkt = (char*)malloc(pkt_size);
+		dgram pkt_header;
 
 		while (true) {
 
 			// Each iteration of this loop equals to an attempt to receive a packet.
-			size_t recvbytes = recvfrom(winsocket, pkt, pkt_size, 0, NULL, NULL);
+			size_t recvbytes = recv_dgram(pkt_header, pl_size, buf);
 			if (recvbytes == SOCKET_ERROR) {
-				free(pkt);
 				throw new SocketException("Could not receive DATA message from other endpoint!");
 			}
-			if (recvbytes < pkt_size) continue; //I don't know WHAT that is...
-
-			dgram *pkt_header = (dgram*)pkt;
+			if (recvbytes < hdr_size) continue; //I don't know WHAT that is...
 
 			// Check that packet is a DATA packet
-			if (pkt_header->type != DATA) {
-				if (pkt_header->type == SYNACK) {
+			if (pkt_header.type != DATA) {
+				if (pkt_header.type == SYNACK) {
 					// This is an old SYNACK packet that must be re-acked.
-					send_ack(lastAck.seqno, *pkt_header);
+					send_ack(lastAck.seqno, pkt_header);
 				}
 				continue;
 			}
 
 			// Check that it is of the correct sequence number
-			if (pkt_header->seqno != dest_seqno) {
+			if (pkt_header.seqno != dest_seqno) {
 				// This is an old DATA packet that must be re-acked
-				send_ack(lastAck.seqno, *pkt_header);
+				send_ack(lastAck.seqno, pkt_header);
 				continue;
 			}
 
 			// We got the packet; send ACK
-			send_ack(this_seqno, *pkt_header);
+			send_ack(this_seqno, pkt_header);
 
 			break;
 		}
-		// This is our packet! Copy into output buffer, increment sequence numbers, free memory, etc.
+		// This is our packet! Increment sequence numbers, move buffer pointer, etc.
 		this_seqno = nextSeqNo(this_seqno);
 		dest_seqno = nextSeqNo(dest_seqno);
-		memcpy(buf, pkt + hdr_size, pl_size);
 		buf += pl_size;
 		len = max(0, len - pl_size);
-		free(pkt);
 		bytes_received += pl_size;
 	}
 	if (trace) tracefile << "RECEIVER: Received " << bytes_received << " bytes!\n";
 	return bytes_received;
+}
+
+int net::Socket::recv_dgram(dgram &header, size_t pl_size, void *payload) {
+	size_t hdr_size = sizeof(dgram);
+	if (pl_size == 0) {
+		return recvfrom(winsocket, (char*)&header, hdr_size, 0, NULL, NULL);
+		// XXX Check sender!!
+	}
+	size_t pkt_size = hdr_size + pl_size;
+	char * pkt = (char*)malloc(pkt_size);
+	size_t recvbytes = recvfrom(winsocket, pkt, pkt_size, 0, NULL, NULL);
+	// XXX Check sender!!
+	if (recvbytes >= hdr_size) {
+		header = *(dgram*)pkt; // Copy header bytes into dgram
+	}
+	if (recvbytes == pkt_size) {
+		memcpy(payload, pkt + hdr_size, pl_size); // Copy payload bytes into buffer
+	}
+	free(pkt);
+	return recvbytes;
 }
 
 int net::Socket::send_ack(int seqNo, dgram acked) {
@@ -214,7 +228,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, const struct s
 		if (trace) tracefile << "CLIENT: Waiting for SYNACK message\n";
 
 		dgram _synack;
-		int recvbytes = recvfrom(winsocket, (char*)&_synack, sizeof(_synack), 0, 0, 0);
+		int recvbytes = recv_dgram(_synack, 0, NULL);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured
@@ -280,7 +294,7 @@ void net::ServerSocket::listen(int backlog) {
 
 		// Wait for ACK
 		if (trace) tracefile << "SERVER: Waiting for acknowledgement of SYNACK\n";
-		int recvbytes = recvfrom(winsocket, (char*)&_ack, sizeof(_ack), 0, 0, 0);
+		int recvbytes = recv_dgram(_ack, 0, NULL);
 		if (recvbytes == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
 			// Some other error occured

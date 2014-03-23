@@ -68,8 +68,9 @@ namespace net {
 		int recv(char * buf, int len, int flags);
 
 		// Convenience methods
-		int send_ack(int seqNo, dgram acked);
+		int recv_dgram(dgram &pkt, size_t payload_size, void *payload);
 		int send_dgram(const dgram &pkt);
+		int send_ack(int seqNo, dgram acked);
 	};
 
 	class ClientSocket : public Socket {
