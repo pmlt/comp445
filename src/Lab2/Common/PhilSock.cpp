@@ -266,7 +266,6 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 	if (trace) tracefile << "CLIENT: Sending SYN message with Seq No " << _syn.seqno << "\n";
 	int sentbytes = sendto(winsocket, (const char*)&_syn, sizeof(dgram), 0, (const sockaddr*)name, namelen);
 	if (sentbytes == SOCKET_ERROR) {
-		std::cout << "Socket error: " << WSAGetLastError() << std::endl;
 		traceError(WSAGetLastError(), "SOCKET_ERROR while sendto");
 		throw new SocketException("Could not send SYN");
 	}
