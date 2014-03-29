@@ -20,7 +20,6 @@ namespace net {
 	// Our datagram structure
 	struct dgram {
 		int seqno;        // Sequence number
-		int ack_seqno;    // For ACK and SYNACK messages; SeqNo of ACKed message
 		MSGTYPE type;     // The type of message
 		size_t size;      // How large is the payload (in bytes)
 		char payload[MAX_PAYLOAD_SIZE];
@@ -35,8 +34,6 @@ namespace net {
 		int this_seqno;
 		int dest_seqno;
 
-		dgram lastAck;
-
 		bool trace;
 		std::ofstream tracefile;
 
@@ -50,7 +47,7 @@ namespace net {
 		void synack(dgram &d, dgram acked);
 
 		// Constructor for a ACK message
-		void ack(dgram &d, int seqNo, dgram acked);
+		void ack(dgram &d, dgram acked);
 
 		// Constructor for a DATA message
 		void data(dgram &d, int seqNo, size_t sz, const char * payload);
@@ -71,7 +68,7 @@ namespace net {
 		// Convenience methods
 		int recv_dgram(dgram &pkt, bool acceptDest = 0);
 		int send_dgram(const dgram &pkt);
-		int send_ack(int seqNo, dgram acked);
+		int send_ack(dgram acked);
 		void traceError(int err, char *msg);
 	};
 
