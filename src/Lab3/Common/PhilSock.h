@@ -14,6 +14,7 @@ namespace net {
 		SYN,    // Client sends this to initialize connection
 		SYNACK, // Server response to SYN
 		ACK,    // Acknowledgement
+		FIN,    // End-of-transmission notice
 		DATA    // Datagram containing application data
 	};
 
@@ -48,6 +49,9 @@ namespace net {
 
 		// Constructor for a ACK message
 		void ack(dgram &d, dgram acked);
+
+		// Constructor for a FIN message
+		void fin(dgram &d, dgram ack);
 
 		// Constructor for a DATA message
 		void data(dgram &d, int seqNo, size_t sz, const char * payload);

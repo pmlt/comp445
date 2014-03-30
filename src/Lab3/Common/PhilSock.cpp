@@ -55,6 +55,12 @@ void net::Socket::ack(dgram &d, dgram acked) {
 	d.size = 0;
 }
 
+void net::Socket::fin(dgram &d, dgram ack) {
+	d.seqno = ack.seqno;
+	d.type = FIN;
+	d.size = 0;
+}
+
 void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
 	d.seqno = seqNo;
 	d.type = DATA;
@@ -65,6 +71,7 @@ void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
 
 int net::Socket::send(const char * buf, int len, int flags) {
 
+	dgram packet, _ack;
 	if (trace) tracefile << "SENDER: About to send " << len << " bytes in chunks of " << MAX_PAYLOAD_SIZE << "\n";
 	int bytes_sent = 0;
 	while (len > 0) {
@@ -74,7 +81,6 @@ int net::Socket::send(const char * buf, int len, int flags) {
 		// First, prepare packet
 		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
 		size_t pkt_size = sizeof(dgram);
-		dgram packet;
 		// Initialize headers
 		data(packet, this_seqno, pl_size, buf);
 
@@ -85,7 +91,6 @@ int net::Socket::send(const char * buf, int len, int flags) {
 		while (true) {
 
 			// Wait for ACK
-			dgram _ack;
 			int recvbytes = recv_dgram(_ack);
 			if (recvbytes == SOCKET_ERROR) {
 				if (WSAGetLastError() == WSAETIMEDOUT) {
@@ -104,23 +109,19 @@ int net::Socket::send(const char * buf, int len, int flags) {
 					// This is an old packet that should be re-acked.
 					send_ack(_ack);
 				}
-				else if (_ack.type == DATA) {
-					// This is the problematic case. There are two possibilities:
-					if (_ack.seqno != dest_seqno) {
-						// 1) The other side is sending an old DATA whose ACK was lost.
-						// ACK packet, then wait
-						send_ack(_ack);
-					}
-					else {
-						// 2) The other side is sending a new DATA ; the ACK we were waiting for was lost.
-						break;
-					}
-				}
 				continue;
 			}
 
 			//Check that this ACK is ACKing our DATA packet specifically
-			if (_ack.seqno != packet.seqno) continue;
+			if (_ack.seqno != packet.seqno) {
+				// This is an old ACK that was lost in the last transfer.
+				// Re-send FIN to finalize that transfer
+				if (trace) tracefile << "SENDER: Re-sending FIN to finalize previous transfer.\n";
+				dgram _fin;
+				fin(_fin, packet);
+				send_dgram(_fin);
+				continue;
+			}
 
 			// Packet was acknowledged!
 			break;
@@ -131,8 +132,14 @@ int net::Socket::send(const char * buf, int len, int flags) {
 		len = max(0, len - pl_size);
 		bytes_sent += pl_size;
 	}
-	// Sent all payload bytes!
 
+	// Send FIN to signal end of transfer.
+	if (trace) tracefile << "SENDER: Sending FIN to finalize transfer.\n";
+	dgram _fin;
+	fin(_fin, _ack);
+	send_dgram(_fin);
+	
+	// Sent all payload bytes!
 	if (trace) tracefile << "SENDER: Completed sending " << bytes_sent << " bytes!\n";
 	return bytes_sent;
 }
@@ -141,12 +148,12 @@ int net::Socket::recv(char * buf, int len, int flags) {
 
 	if (trace) tracefile << "RECEIVER: Expecting " << len << " bytes in chunks of " << MAX_PAYLOAD_SIZE << " bytes\n";
 
+	dgram pkt, _fin;
 	size_t bytes_received = 0;
 	while (len > 0) {
 		if (trace) tracefile << "RECEIVER: Expecting packet #" << dest_seqno << "\n";
 		// Each iteration of this loop equals to a packet being received
 		size_t hdr_size = sizeof(dgram);
-		dgram pkt;
 
 		while (true) {
 
@@ -165,12 +172,20 @@ int net::Socket::recv(char * buf, int len, int flags) {
 					// This is an old SYNACK packet that must be re-acked.
 					send_ack(pkt);
 				}
+				else if (pkt.type == ACK) {
+					// This is an old ACK that was lost in the last transfer.
+					// Re-send FIN to finalize that transfer
+					if (trace) tracefile << "RECEIVER: Re-sending FIN to finalize previous transfer.\n";
+					fin(_fin, pkt);
+					send_dgram(_fin);
+				}
 				continue;
 			}
 
 			// Check that it is of the correct sequence number
 			if (pkt.seqno != dest_seqno) {
 				// This is an old DATA packet that must be re-acked
+				if (trace) tracefile << "RECEIVER: Re-acking previous DATA packet.\n";
 				send_ack(pkt);
 				continue;
 			}
@@ -186,6 +201,23 @@ int net::Socket::recv(char * buf, int len, int flags) {
 		buf += pkt.size;
 		len = max(0, len - pkt.size);
 		bytes_received += pkt.size;
+	}
+
+	// Wait for the FIN.
+	if (trace) tracefile << "RECEIVER: Waiting for FIN.\n";
+	while (true) {
+		int rbytes = recv_dgram(_fin);
+		if (rbytes == SOCKET_ERROR) {
+			if (WSAGetLastError() == WSAETIMEDOUT) {
+				send_ack(pkt); // Re-send last ACK, it got lost
+				continue;
+			}
+			traceError(WSAGetLastError(), "SOCKET_ERROR while waiting for FIN");
+			throw new SocketException("Could not receive FIN message from other endpoint!");
+		}
+		if (_fin.type == FIN) break;
+		// Re-send last ACK, it got lost
+		send_ack(pkt);
 	}
 	if (trace) tracefile << "RECEIVER: Received " << bytes_received << " bytes!\n";
 	return bytes_received;
