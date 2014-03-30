@@ -17,6 +17,16 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Common", "Common\Common.vcx
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Router", "Router\Router.vcxproj", "{85F943F0-BA4D-4DED-ACAB-0C18FFDCC811}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sender", "Sender\Sender.vcxproj", "{914E9B5E-7B66-4C7A-801F-F1AD9105CAED}"
+	ProjectSection(ProjectDependencies) = postProject
+		{40069CDE-3A09-4D91-814D-349A4DABFA1F} = {40069CDE-3A09-4D91-814D-349A4DABFA1F}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Receiver", "Receiver\Receiver.vcxproj", "{A6131F7B-0949-4310-94E8-F16E8EC7AB52}"
+	ProjectSection(ProjectDependencies) = postProject
+		{40069CDE-3A09-4D91-814D-349A4DABFA1F} = {40069CDE-3A09-4D91-814D-349A4DABFA1F}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -39,6 +49,14 @@ Global
 		{85F943F0-BA4D-4DED-ACAB-0C18FFDCC811}.Debug|Win32.Build.0 = Debug|Win32
 		{85F943F0-BA4D-4DED-ACAB-0C18FFDCC811}.Release|Win32.ActiveCfg = Release|Win32
 		{85F943F0-BA4D-4DED-ACAB-0C18FFDCC811}.Release|Win32.Build.0 = Release|Win32
+		{914E9B5E-7B66-4C7A-801F-F1AD9105CAED}.Debug|Win32.ActiveCfg = Debug|Win32
+		{914E9B5E-7B66-4C7A-801F-F1AD9105CAED}.Debug|Win32.Build.0 = Debug|Win32
+		{914E9B5E-7B66-4C7A-801F-F1AD9105CAED}.Release|Win32.ActiveCfg = Release|Win32
+		{914E9B5E-7B66-4C7A-801F-F1AD9105CAED}.Release|Win32.Build.0 = Release|Win32
+		{A6131F7B-0949-4310-94E8-F16E8EC7AB52}.Debug|Win32.ActiveCfg = Debug|Win32
+		{A6131F7B-0949-4310-94E8-F16E8EC7AB52}.Debug|Win32.Build.0 = Debug|Win32
+		{A6131F7B-0949-4310-94E8-F16E8EC7AB52}.Release|Win32.ActiveCfg = Release|Win32
+		{A6131F7B-0949-4310-94E8-F16E8EC7AB52}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
