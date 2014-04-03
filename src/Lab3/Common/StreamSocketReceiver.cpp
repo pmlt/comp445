@@ -23,7 +23,7 @@ size_t StreamSocketReceiver::receiveHeader(net::Socket &s)
 {
 	char buf[20];
 	size_t bytes_received;
-	if (bytes_received = s.recv(buf, 20, 0) == SOCKET_ERROR) {
+	if (bytes_received = s.recv(buf, 20) != 20) {
 		throw IncompleteReceiveException(bytes_received, 20);
 	}
 
@@ -41,8 +41,8 @@ void StreamSocketReceiver::receivePayload(net::Socket &s, ostream &stream, size_
 	size_t bytes_read = 0;
 	while (bytes_read < len) {
 		size_t exp_bytes = min(this->packet_size, len - bytes_read);
-		size_t bytes_recv = s.recv((char*)buf, exp_bytes, 0);
-		if (bytes_recv == SOCKET_ERROR || bytes_recv != exp_bytes) {
+		size_t bytes_recv = s.recv((char*)buf, exp_bytes);
+		if (bytes_recv != exp_bytes) {
 			free(buf);
 			throw IncompleteReceiveException(bytes_read + bytes_recv, len);
 		}

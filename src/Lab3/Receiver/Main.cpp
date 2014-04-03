@@ -42,7 +42,7 @@ int main() {
 
 	cout << "Received connection, waiting for file size." << endl;
 	size_t filesize;
-	socket.recv((char*)&filesize, sizeof(filesize), 0);
+	socket.recv((char*)&filesize, sizeof(filesize));
 
 	char * buf = (char*)malloc(filesize);
 	if (buf == NULL) {
@@ -53,7 +53,7 @@ int main() {
 
 	cout << "About to receive " << filesize << " bytes." << endl;
 
-	int bytes = socket.recv(buf, filesize, 0);
+	size_t bytes = socket.recv(buf, filesize);
 
 	cout << "Received " << bytes << " bytes, writing to file " << FILE << endl;
 	file.write(buf, filesize);

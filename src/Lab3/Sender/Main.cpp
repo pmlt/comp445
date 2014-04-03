@@ -65,8 +65,8 @@ int main() {
 	net::ClientSocket socket(AF_INET, 0, TRACE, LOCAL_PORT, &sa_in, sizeof(sa_in));
 
 	// First send the size, then send the file
-	socket.send((const char*)&(stats.st_size), sizeof(stats.st_size), 0);
-	int bsent = socket.send(buf, stats.st_size, 0);
+	socket.send((const char*)&(stats.st_size), sizeof(stats.st_size));
+	int bsent = socket.send(buf, stats.st_size);
 	cout << "Sent " << bsent << " bytes." << endl;
 	
 	free(buf);

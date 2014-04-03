@@ -10,8 +10,12 @@ net::Socket::Socket(int af, int protocol, bool trace) :
 		af(af),
 		protocol(protocol),
 		dest_len(sizeof(dest)),
-		this_seqno(0),
-		dest_seqno(0),
+		sndr_seqno(0),
+		sndr_buf(NULL),
+		sndr_len(0),
+		recv_seqno(0),
+		recv_buf(NULL),
+		recv_len(0),
 		trace(trace),
 		tracefile(TRACEFILE, std::ios::out | std::ios::trunc)
 {
@@ -55,12 +59,6 @@ void net::Socket::ack(dgram &d, dgram acked) {
 	d.size = 0;
 }
 
-void net::Socket::fin(dgram &d, dgram ack) {
-	d.seqno = ack.seqno;
-	d.type = FIN;
-	d.size = 0;
-}
-
 void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
 	d.seqno = seqNo;
 	d.type = DATA;
@@ -69,158 +67,103 @@ void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
 	memcpy((void*)d.payload, payload, sz);
 }
 
-int net::Socket::send(const char * buf, int len, int flags) {
+void net::Socket::wait(size_t &recv, size_t &sent) {
+	dgram sent_pkt, recv_pkt;
 
-	dgram packet, _ack;
-	if (trace) tracefile << "SENDER: About to send " << len << " bytes in chunks of " << MAX_PAYLOAD_SIZE << "\n";
-	int bytes_sent = 0;
-	while (len > 0) {
-		// Each iteration of this loop equals to a packet being sent
-		if (trace) tracefile << "SENDER: Sending packet #" << this_seqno << "\n";
+	// Initialize to 0
+	recv = 0;
+	sent = 0;
 
-		// First, prepare packet
-		size_t pl_size = min(MAX_PAYLOAD_SIZE, len);
-		size_t pkt_size = sizeof(dgram);
-		// Initialize headers
-		data(packet, this_seqno, pl_size, buf);
+	// Loop until there is no job left.
+	while (sndr_len > 0 || recv_len > 0) {
 
-		// The packet is ready to be sent.
-		// Send the packet
-		send_dgram(packet);
-
-		while (true) {
-
-			// Wait for ACK
-			int recvbytes = recv_dgram(_ack);
-			if (recvbytes == SOCKET_ERROR) {
-				if (WSAGetLastError() == WSAETIMEDOUT) {
-					// Timed out, try sending packet again
-					send_dgram(packet);
-					continue;
-				}
-				// Some other error occured
-				traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
-				throw new SocketException("Could not receive ACK from other endpoint!");
-			}
-
-			//Check that this is indeed an ACK
-			if (_ack.type != ACK) {
-				if (_ack.type == SYNACK) {
-					// This is an old packet that should be re-acked.
-					send_ack(_ack);
-				}
-				continue;
-			}
-
-			//Check that this ACK is ACKing our DATA packet specifically
-			if (_ack.seqno != packet.seqno) {
-				// This is an old ACK that was lost in the last transfer.
-				// Re-send FIN to finalize that transfer
-				if (trace) tracefile << "SENDER: Re-sending FIN to finalize previous transfer.\n";
-				dgram _fin;
-				fin(_fin, packet);
-				send_dgram(_fin);
-				continue;
-			}
-
-			// Packet was acknowledged!
-			break;
+		if (sndr_len > 0) {
+			// We have some outstanding bytes to send.
+			size_t pl_size = min(MAX_PAYLOAD_SIZE, sndr_len);
+			data(sent_pkt, sndr_seqno, pl_size, sndr_buf);
+			if (trace) tracefile << "SENDER: Sending packet #" << sent_pkt.seqno << "\n";
+			send_dgram(sent_pkt);
 		}
-		// Packet is sent; increment sequence numbers, free memory and move on to next.
-		this_seqno = nextSeqNo(this_seqno);
-		buf += pl_size;
-		len = max(0, len - pl_size);
-		bytes_sent += pl_size;
-	}
 
-	// Send FIN to signal end of transfer.
-	if (trace) tracefile << "SENDER: Sending FIN to finalize transfer.\n";
-	dgram _fin;
-	fin(_fin, _ack);
-	send_dgram(_fin);
-	
-	// Sent all payload bytes!
-	if (trace) tracefile << "SENDER: Completed sending " << bytes_sent << " bytes!\n";
-	return bytes_sent;
+		// Wait for a packet.
+		int status = recv_dgram(recv_pkt);
+		if (status == SOCKET_ERROR) {
+			if (WSAGetLastError() == WSAETIMEDOUT) {
+				// Timed out, try sending packet again
+				continue;
+			}
+			// This is another type of error.
+			traceError(WSAGetLastError(), "SOCKET_ERROR while waiting for packet.");
+			throw new SocketException("Could not receive ACK from other endpoint!");
+		}
+
+		// We have something; how we react depends on the type of packet received.
+		switch (recv_pkt.type) {
+		case SYNACK: 
+			// Last ACK of connection handshake was lost. Re-ACK it.
+			send_ack(recv_pkt);
+			break; // Go back to waiting.
+		case ACK: 
+			// Were we waiting for one of these?
+			if (sndr_len > 0) {
+				// Yes. Is this the one we were waiting for?
+				if (recv_pkt.seqno == sent_pkt.seqno) {
+					if (trace) tracefile << "SENDER: Received ACK for packet #" << recv_pkt.seqno << "\n";
+					// Yes. Packet was acknowledged. 
+					sndr_seqno = nextSeqNo(sndr_seqno);
+					sndr_len -= sent_pkt.size;
+					sndr_buf += sent_pkt.size;
+					sent += sent_pkt.size;
+				}
+			}
+			// In all other cases, simply discard.
+			break;
+		case DATA:
+			// Were we waiting for one of these?
+			if (recv_len > 0) {
+				// Yes. Is this the one we were waiting for?
+				if (recv_pkt.seqno == recv_seqno) {
+					if (trace) tracefile << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << "\n";
+					// Yes. We have received the expected packet.
+					size_t safe_size = min(recv_len, recv_pkt.size); // In case the client sent too many bytes.
+					memcpy(recv_buf, recv_pkt.payload, safe_size); // Copy payload bytes into buffer
+					recv_seqno = nextSeqNo(recv_seqno);
+					recv_len -= safe_size;
+					recv_buf += safe_size;
+					recv += safe_size;
+				}
+			}
+			if (trace) tracefile << "RECEIVER: Acknowledging packet #" << recv_pkt.seqno << "\n";
+			send_ack(recv_pkt); // Acknowledge the packet in all cases.
+			break;
+
+		default: break; // Default is to discard packet.
+		}
+	}
 }
 
-int net::Socket::recv(char * buf, int len, int flags) {
+size_t net::Socket::send(const char * buf, int len) {
+	size_t r, s;
 
-	if (trace) tracefile << "RECEIVER: Expecting " << len << " bytes in chunks of " << MAX_PAYLOAD_SIZE << " bytes\n";
+	// Setup sender job.
+	sndr_buf = buf;
+	sndr_len = len;
 
-	dgram pkt, _fin;
-	size_t bytes_received = 0;
-	while (len > 0) {
-		if (trace) tracefile << "RECEIVER: Expecting packet #" << dest_seqno << "\n";
-		// Each iteration of this loop equals to a packet being received
-		size_t hdr_size = sizeof(dgram);
+	// Block until the job is done
+	wait(r, s);
+	return s;
+}
 
-		while (true) {
+size_t net::Socket::recv(char * buf, int len) {
+	size_t r, s;
 
-			// Each iteration of this loop equals to an attempt to receive a packet.
-			int recvbytes = recv_dgram(pkt);
-			if (recvbytes == SOCKET_ERROR) {
-				if (WSAGetLastError() == WSAETIMEDOUT) continue; // Timed out, try again
-				traceError(WSAGetLastError(), "SOCKET_ERROR while recv");
-				throw new SocketException("Could not receive DATA message from other endpoint!");
-			}
-			if (recvbytes < hdr_size) continue; //I don't know WHAT that is...
+	// Setup receiver job
+	recv_buf = buf;
+	recv_len = len;
 
-			// Check that packet is a DATA packet
-			if (pkt.type != DATA) {
-				if (pkt.type == SYNACK) {
-					// This is an old SYNACK packet that must be re-acked.
-					send_ack(pkt);
-				}
-				else if (pkt.type == ACK) {
-					// This is an old ACK that was lost in the last transfer.
-					// Re-send FIN to finalize that transfer
-					if (trace) tracefile << "RECEIVER: Re-sending FIN to finalize previous transfer.\n";
-					fin(_fin, pkt);
-					send_dgram(_fin);
-				}
-				continue;
-			}
-
-			// Check that it is of the correct sequence number
-			if (pkt.seqno != dest_seqno) {
-				// This is an old DATA packet that must be re-acked
-				if (trace) tracefile << "RECEIVER: Re-acking previous DATA packet.\n";
-				send_ack(pkt);
-				continue;
-			}
-
-			// We got the packet; send ACK
-			send_ack(pkt);
-
-			break;
-		}
-		// This is our packet! Increment sequence numbers, move buffer pointer, etc.
-		dest_seqno = nextSeqNo(dest_seqno);
-		memcpy(buf, pkt.payload, pkt.size); // Copy payload bytes into buffer
-		buf += pkt.size;
-		len = max(0, len - pkt.size);
-		bytes_received += pkt.size;
-	}
-
-	// Wait for the FIN.
-	if (trace) tracefile << "RECEIVER: Waiting for FIN.\n";
-	while (true) {
-		int rbytes = recv_dgram(_fin);
-		if (rbytes == SOCKET_ERROR) {
-			if (WSAGetLastError() == WSAETIMEDOUT) {
-				send_ack(pkt); // Re-send last ACK, it got lost
-				continue;
-			}
-			traceError(WSAGetLastError(), "SOCKET_ERROR while waiting for FIN");
-			throw new SocketException("Could not receive FIN message from other endpoint!");
-		}
-		if (_fin.type == FIN) break;
-		// Re-send last ACK, it got lost
-		send_ack(pkt);
-	}
-	if (trace) tracefile << "RECEIVER: Received " << bytes_received << " bytes!\n";
-	return bytes_received;
+	// Block until the job is done
+	wait(r, s);
+	return r;
 }
 
 int net::Socket::recv_dgram(dgram &pkt, bool acceptDest) {
@@ -293,7 +236,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 		throw new SocketException("Could not send SYN");
 	}
 
-	this_seqno = nextSeqNo(_syn.seqno);
+	sndr_seqno = nextSeqNo(_syn.seqno);
 
 	// Step 2: Wait for SYNACK
 	if (trace) tracefile << "CLIENT: Waiting for SYNACK message\n";
@@ -316,7 +259,7 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 
 		if (trace) tracefile << "CLIENT: Received SYNACK with Seq No " << _synack.seqno << "\n";
 
-		dest_seqno = nextSeqNo(_synack.seqno);
+		recv_seqno = nextSeqNo(_synack.seqno);
 
 		// Step 3: Send ACK
 		if (trace) tracefile << "CLIENT: Sending ACK in response to SYNACK\n";
@@ -328,8 +271,8 @@ net::ClientSocket::ClientSocket(int af, int protocol, bool trace, int local_port
 	if (trace) {
 		tracefile << "CLIENT: Connection established!\n";
 		tracefile << "Next sequence numbers will be:\n";
-		tracefile << "  Client: " << this_seqno << "\n";
-		tracefile << "  Server: " << dest_seqno << "\n";
+		tracefile << "  Client: " << sndr_seqno << "\n";
+		tracefile << "  Server: " << recv_seqno << "\n";
 	}
 }
 
@@ -358,7 +301,7 @@ void net::ServerSocket::listen(int backlog) {
 
 		break;
 	}
-	dest_seqno = nextSeqNo(_syn.seqno);
+	recv_seqno = nextSeqNo(_syn.seqno);
 
 	if (trace) tracefile << "SERVER: Received SYN with Seq No " << _syn.seqno << "\n";
 	
@@ -397,13 +340,13 @@ void net::ServerSocket::listen(int backlog) {
 	std::cout << "Accepted connection from " << inet_ntoa(dest.sin_addr) << ":"
 		 << std::hex << htons(dest.sin_port) << std::dec << std::endl;
 
-	this_seqno = nextSeqNo(_synack.seqno);
+	sndr_seqno = nextSeqNo(_synack.seqno);
 
 	if (trace) {
 		tracefile << "SERVER: Received SYNACK acknowledgement, connection established!\n";
 		tracefile << "Next sequence numbers will be:\n";
-		tracefile << "  Client: " << dest_seqno << "\n";
-		tracefile << "  Server: " << this_seqno << "\n";
+		tracefile << "  Client: " << recv_seqno << "\n";
+		tracefile << "  Server: " << sndr_seqno << "\n";
 	}
 }
 
@@ -417,6 +360,6 @@ void net::Socket::traceError(int err, char *msg) {
 		(LPSTR)&errString,
 		0,
 		0);
-	if (trace) tracefile << msg << ": " << errString << std::endl;
+	if (trace) tracefile << msg << ": Error #" << err << ": " << errString << std::endl;
 	LocalFree(errString);
 }

@@ -14,7 +14,6 @@ namespace net {
 		SYN,    // Client sends this to initialize connection
 		SYNACK, // Server response to SYN
 		ACK,    // Acknowledgement
-		FIN,    // End-of-transmission notice
 		DATA    // Datagram containing application data
 	};
 
@@ -28,13 +27,22 @@ namespace net {
 
 	class Socket {
 	protected:
+		// WINSOCK variables
 		::SOCKET winsocket;
 		int af;
 		int protocol;
 
-		int this_seqno;
-		int dest_seqno;
+		// SENDER state
+		int sndr_seqno;
+		const char * sndr_buf; // Pointer to the next byte to send
+		size_t sndr_len; // How many bytes left to send
 
+		// RECEIVER state
+		int recv_seqno;
+		char * recv_buf; // Pointer to the location where next received byte will be written
+		size_t recv_len; // How many bytes left we are expecting to receive
+
+		// DEBUG variables
 		bool trace;
 		std::ofstream tracefile;
 
@@ -50,11 +58,13 @@ namespace net {
 		// Constructor for a ACK message
 		void ack(dgram &d, dgram acked);
 
-		// Constructor for a FIN message
-		void fin(dgram &d, dgram ack);
-
 		// Constructor for a DATA message
 		void data(dgram &d, int seqNo, size_t sz, const char * payload);
+
+		// Generic blocking method. Blocks until all outstanding operations are completed (both send and receive)
+		void wait(size_t &recv, size_t &sent);
+
+		int sendNextPacket();
 
 	public:
 		sockaddr_in dest;
@@ -63,11 +73,11 @@ namespace net {
 		Socket(int af, int protocol, bool trace);
 		virtual ~Socket();
 
-		// This will BLOCK until we have received ACK
-		int send(const char * buf, int len, int flags);
+		// Reliable (blocking) send method
+		size_t send(const char * buf, int len);
 
-		// This will BLOCK until we have received expected #
-		int recv(char * buf, int len, int flags);
+		// Reliable (blocking) recv method
+		size_t recv(char * buf, int len);
 
 		// Convenience methods
 		int recv_dgram(dgram &pkt, bool acceptDest = 0);
