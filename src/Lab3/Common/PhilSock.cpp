@@ -38,7 +38,7 @@ int net::Socket::genSeqNo() {
 }
 
 int net::Socket::nextSeqNo(int seqNo) {
-	return (seqNo + 1) & SEQNO_MASK;
+	return (seqNo + 1) % SEQNO_MAX;
 }
 
 void net::Socket::syn(dgram &d) {
@@ -74,15 +74,18 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 	recv = 0;
 	sent = 0;
 
+	bool packet_sent(false); // Whether the current packet, if any, has been sent
+
 	// Loop until there is no job left.
 	while (sndr_len > 0 || recv_len > 0) {
 
-		if (sndr_len > 0) {
+		if (sndr_len > 0 && !packet_sent) {
 			// We have some outstanding bytes to send.
 			size_t pl_size = min(MAX_PAYLOAD_SIZE, sndr_len);
 			data(sent_pkt, sndr_seqno, pl_size, sndr_buf);
 			if (trace) tracefile << "SENDER: Sending packet #" << sent_pkt.seqno << "\n";
 			send_dgram(sent_pkt);
+			packet_sent = true;
 		}
 
 		// Wait for a packet.
@@ -90,11 +93,12 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		if (status == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) {
 				// Timed out, try sending packet again
+				packet_sent = false;
 				continue;
 			}
 			// This is another type of error.
 			traceError(WSAGetLastError(), "SOCKET_ERROR while waiting for packet.");
-			throw new SocketException("Could not receive ACK from other endpoint!");
+			throw new SocketException("Could not receive packet!");
 		}
 
 		// We have something; how we react depends on the type of packet received.
@@ -114,6 +118,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 					sndr_len -= sent_pkt.size;
 					sndr_buf += sent_pkt.size;
 					sent += sent_pkt.size;
+					packet_sent = false;
 				}
 			}
 			// In all other cases, simply discard.
@@ -121,16 +126,19 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		case DATA:
 			// Were we waiting for one of these?
 			if (recv_len > 0) {
+				size_t expected_size = min(MAX_PAYLOAD_SIZE, recv_len);
 				// Yes. Is this the one we were waiting for?
-				if (recv_pkt.seqno == recv_seqno) {
+				if (recv_pkt.seqno == recv_seqno && recv_pkt.size == expected_size) {
 					if (trace) tracefile << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << "\n";
 					// Yes. We have received the expected packet.
-					size_t safe_size = min(recv_len, recv_pkt.size); // In case the client sent too many bytes.
-					memcpy(recv_buf, recv_pkt.payload, safe_size); // Copy payload bytes into buffer
+					memcpy(recv_buf, recv_pkt.payload, recv_pkt.size); // Copy payload bytes into buffer
 					recv_seqno = nextSeqNo(recv_seqno);
-					recv_len -= safe_size;
-					recv_buf += safe_size;
-					recv += safe_size;
+					recv_len -= recv_pkt.size;
+					recv_buf += recv_pkt.size;
+					recv += recv_pkt.size;
+				}
+				else {
+					if (trace) tracefile << "RECEIVER: Received unexpected DATA packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
 				}
 			}
 			if (trace) tracefile << "RECEIVER: Acknowledging packet #" << recv_pkt.seqno << "\n";
