@@ -1,6 +1,7 @@
 #pragma once
 #include <WinSock2.h>
 #include <fstream>
+#include <ctime>
 
 #define TRACEFILE   "trace.log"
 #define MAX_PAYLOAD_SIZE 1000 // Maximum payload size (in bytes)
@@ -24,6 +25,18 @@ namespace net {
 		MSGTYPE type;     // The type of message
 		size_t size;      // How large is the payload (in bytes)
 		char payload[MAX_PAYLOAD_SIZE];
+	};
+
+	struct parameters {
+		int payload_size;
+		int window_size;
+		int timeout;
+	};
+
+	struct statistics {
+		int packets_sent;
+		int packets_required;
+		clock_t transfer_time;
 	};
 
 	class Socket {
@@ -63,7 +76,7 @@ namespace net {
 		void data(dgram &d, int seqNo, size_t sz, const char * payload);
 
 		// Generic blocking method. Blocks until all outstanding operations are completed (both send and receive)
-		void wait(size_t &recv, size_t &sent);
+		void wait(size_t &recv, size_t &sent, statistics * stats = NULL);
 
 		int sendNextPacket();
 
@@ -71,11 +84,13 @@ namespace net {
 		sockaddr_in dest;
 		int dest_len;
 
+		parameters params;
+
 		Socket(int af, int protocol, bool trace);
 		virtual ~Socket();
 
 		// Reliable (blocking) send method
-		size_t send(const char * buf, int len);
+		size_t send(const char * buf, int len, statistics * stats = NULL);
 
 		// Reliable (blocking) recv method
 		size_t recv(char * buf, int len);

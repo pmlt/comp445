@@ -4,7 +4,7 @@
 #include <WinSock2.h>
 #include <iostream>
 #include <stdlib.h>
-#include <time.h>
+#include <ctime>
 
 net::Socket::Socket(int af, int protocol, bool trace) :
 		winsocket(::socket(af, SOCK_DGRAM, protocol)),
@@ -20,6 +20,10 @@ net::Socket::Socket(int af, int protocol, bool trace) :
 		trace(trace),
 		tracefile(TRACEFILE, std::ios::out | std::ios::trunc)
 {
+	params.payload_size = MAX_PAYLOAD_SIZE;
+	params.timeout = NET_TIMEOUT;
+	params.window_size = WINDOW_SIZE;
+
 	unsigned long nonblocking = 1;
 	if (winsocket == INVALID_SOCKET) throw new SocketException("Could not initialize socket!");
 	if (0 != ioctlsocket(winsocket, FIONBIO, &nonblocking)) {
@@ -68,19 +72,33 @@ void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
 	memcpy((void*)d.payload, payload, sz);
 }
 
-void net::Socket::wait(size_t &recv, size_t &sent) {
-	dgram sent_pkt[WINDOW_SIZE], recv_pkt;
+void net::Socket::wait(size_t &recv, size_t &sent, statistics * stats) {
+	dgram *sent_pkt, recv_pkt;
+	bool *sndr_acked, *recv_acked;
+	int *timeouts;
+
+	sent_pkt = (dgram*)calloc(sizeof(dgram), params.window_size);
+	sndr_acked = (bool*)calloc(sizeof(bool), params.window_size);
+	recv_acked = (bool*)calloc(sizeof(bool), params.window_size);
+	timeouts = (int*)calloc(sizeof(int), params.window_size);
 
 	// Initialize to 0
 	recv = 0;
 	sent = 0;
 
-	bool sndr_acked[WINDOW_SIZE], recv_acked[WINDOW_SIZE];
-	int timeouts[WINDOW_SIZE];
-	for (int i = 0; i < WINDOW_SIZE; i++) {
+	// Initialize
+	for (int i = 0; i < params.window_size; i++) {
+		data(sent_pkt[i], -1, 0, NULL);
 		recv_acked[i] = false;
 		sndr_acked[i] = false;
 		timeouts[i] = 0;
+	}
+
+	if (stats != NULL) {
+		stats->packets_required = (sndr_len / params.payload_size);
+		if ((sndr_len % params.payload_size) > 0) stats->packets_required++;
+		stats->transfer_time = clock();
+		stats->packets_sent = 0;
 	}
 
 	//std::cout << "INIT JOBS: Sender(" << sndr_len << ", #" << sndr_seqno << "), Receiver(" << recv_len << ", #" << recv_seqno << ")\n";
@@ -90,20 +108,21 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 
 		if (sndr_len > 0) {
 			// We have some outstanding bytes to send.
-			for (int i = 0; i < WINDOW_SIZE; i++) {
+			for (int i = 0; i < params.window_size; i++) {
 				if (timeouts[i] > 0) continue; // Already sent, waiting for ACK
 				if (sndr_acked[i]) continue; // Already ACKed
-				if (sndr_len > i * MAX_PAYLOAD_SIZE) {
-					sent_pkt[i].size = min(MAX_PAYLOAD_SIZE, sndr_len - (i * MAX_PAYLOAD_SIZE));
+				if (sndr_len > i * params.payload_size) {
+					sent_pkt[i].size = min(params.payload_size, sndr_len - (i * params.payload_size));
 				}
 				else {
 					sent_pkt[i].size = 0;
 				}
 				if (sent_pkt[i].size == 0) continue; // Not a real packet (beyond our send buffer)
-				data(sent_pkt[i], (sndr_seqno + i) % SEQNO_MAX, sent_pkt[i].size, sndr_buf + (i*MAX_PAYLOAD_SIZE));
+				data(sent_pkt[i], (sndr_seqno + i) % SEQNO_MAX, sent_pkt[i].size, sndr_buf + (i*params.payload_size));
 				if (trace) tracefile << "SENDER: Sending packet #" << sent_pkt[i].seqno << " of size " << sent_pkt[i].size << "\n";
 				send_dgram(sent_pkt[i]);
-				timeouts[i] = NET_TIMEOUT;
+				timeouts[i] = params.timeout;
+				if (stats != NULL) stats->packets_sent++;
 			}
 		}
 
@@ -115,7 +134,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		if (status == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) {
 				// Complete silence on the wire, try sending ALL packets again
-				for (int i = 0; i < WINDOW_SIZE; i++) {
+				for (int i = 0; i < params.window_size; i++) {
 					timeouts[i] = 0;
 				}
 				continue;
@@ -126,7 +145,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		}
 
 		// Update timeouts according to time elapsed during recv
-		for (int i = 0; i < WINDOW_SIZE; i++) {
+		for (int i = 0; i < params.window_size; i++) {
 			timeouts[i] -= recv_elapsed;
 		}
 
@@ -140,7 +159,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 			// Were we waiting for one of these?
 			if (sndr_len > 0) {
 				// Yes. Is this one of the ones we were waiting for?
-				for (int i = 0; i < WINDOW_SIZE; i++) {
+				for (int i = 0; i < params.window_size; i++) {
 					if (sent_pkt[i].size < 0) continue; // Not a real packet.
 					if (sndr_acked[i]) continue; // Already ACKed, so whatever
 					if (recv_pkt.seqno == sent_pkt[i].seqno) {
@@ -158,15 +177,15 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 					sent += sent_pkt[0].size;
 
 					// Slide window
-					for (int j = 0; j < WINDOW_SIZE - 1; j++) {
+					for (int j = 0; j < params.window_size - 1; j++) {
 						sent_pkt[j] = sent_pkt[j + 1];
 						timeouts[j] = timeouts[j + 1];
 						sndr_acked[j] = sndr_acked[j + 1];
 					}
 					// The new "last packet" is automatically timed out because it has never been sent yet
-					data(sent_pkt[WINDOW_SIZE - 1], -1, 0, NULL);
-					timeouts[WINDOW_SIZE - 1] = 0;
-					sndr_acked[WINDOW_SIZE - 1] = false;
+					data(sent_pkt[params.window_size - 1], -1, 0, NULL);
+					timeouts[params.window_size - 1] = 0;
+					sndr_acked[params.window_size - 1] = false;
 				}
 			}
 			// In all other cases, simply discard.
@@ -174,15 +193,15 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		case DATA:
 			// Were we waiting for one of these?
 			if (recv_len > 0) {
-				for (int i = 0; i < WINDOW_SIZE; i++) {
-					size_t buf_offset = (i * MAX_PAYLOAD_SIZE);
+				for (int i = 0; i < params.window_size; i++) {
+					size_t buf_offset = (i * params.payload_size);
 					if (buf_offset >= recv_len) continue; // Ignore window entries beyond buffer size
 					int seqno = (recv_seqno + i) % SEQNO_MAX;
 					if (recv_pkt.seqno == seqno) {
 						// Packet falls within window.
 						if (!recv_acked[i]) {
 							// Check that packet size matches expected size
-							size_t expected_size = min(MAX_PAYLOAD_SIZE, recv_len - (i * MAX_PAYLOAD_SIZE));
+							size_t expected_size = min(params.payload_size, recv_len - (i * params.payload_size));
 							if (expected_size != recv_pkt.size) {
 								// Problematic case: we received a DATA packet with the correct SeqNo but wrong number of bytes
 								if (trace) tracefile << "RECEIVER: Packet #" << recv_pkt.seqno << " has unexpected size " << recv_pkt.size << " (expected " << expected_size << ").\n";
@@ -202,7 +221,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 				// Slide the receiver window, if necessary.
 				while (recv_acked[0]) {
 					// Update receiver state
-					size_t pktsize = min(MAX_PAYLOAD_SIZE, recv_len);
+					size_t pktsize = min(params.payload_size, recv_len);
 
 					recv_seqno = nextSeqNo(recv_seqno);
 					recv_len -= pktsize;
@@ -210,10 +229,10 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 					recv += pktsize;
 
 					// Slide window
-					for (int j = 0; j < WINDOW_SIZE - 1; j++) {
+					for (int j = 0; j < params.window_size - 1; j++) {
 						recv_acked[j] = recv_acked[j + 1];
 					}
-					recv_acked[WINDOW_SIZE - 1] = false;
+					recv_acked[params.window_size - 1] = false;
 				}
 			}
 			else {
@@ -235,10 +254,17 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		default: break; // Default is to discard packet.
 		}
 	}
+	if (stats != NULL) {
+		stats->transfer_time = (clock() - stats->transfer_time) / (CLOCKS_PER_SEC / 1000);
+	}
 	//std::cout << "FINISH JOBS: Sender(" << sndr_len << ", #" << sndr_seqno << "), Receiver(" << recv_len << ", #" << recv_seqno << ")\n";
+	free(sent_pkt);
+	free(recv_acked);
+	free(sndr_acked);
+	free(timeouts);
 }
 
-size_t net::Socket::send(const char * buf, int len) {
+size_t net::Socket::send(const char * buf, int len, statistics * stats) {
 	size_t r, s;
 
 	// Setup sender job.
@@ -246,7 +272,7 @@ size_t net::Socket::send(const char * buf, int len) {
 	sndr_len = len;
 
 	// Block until the job is done
-	wait(r, s);
+	wait(r, s, stats);
 	return s;
 }
 
@@ -267,8 +293,8 @@ int net::Socket::recv_dgram(dgram &pkt, bool acceptDest) {
 	fd_set fds;
 	int n;
 	struct timeval tv;
-	tv.tv_sec = NET_TIMEOUT / 1000;
-	tv.tv_usec = NET_TIMEOUT * 1000;
+	tv.tv_sec = params.timeout / 1000;
+	tv.tv_usec = params.timeout * 1000;
 
 	FD_ZERO(&fds);
 	FD_SET(winsocket, &fds);
