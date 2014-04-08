@@ -4,8 +4,9 @@
 
 #define TRACEFILE   "trace.log"
 #define MAX_PAYLOAD_SIZE 1000 // Maximum payload size (in bytes)
+#define WINDOW_SIZE 4
 #define SEQNO_MIN   0
-#define SEQNO_MAX   255
+#define SEQNO_MAX   (3*WINDOW_SIZE + 1) // Large enough range of seqno for window size
 //#define SEQNO_MASK  0x01 // This is how we define how many bits are in a sequence number.
 #define NET_TIMEOUT 300  // Time to wait for ACK in milliseconds
 

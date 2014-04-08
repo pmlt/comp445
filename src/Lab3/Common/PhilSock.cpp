@@ -4,6 +4,7 @@
 #include <WinSock2.h>
 #include <iostream>
 #include <stdlib.h>
+#include <time.h>
 
 net::Socket::Socket(int af, int protocol, bool trace) :
 		winsocket(::socket(af, SOCK_DGRAM, protocol)),
@@ -68,37 +69,63 @@ void net::Socket::data(dgram &d, int seqNo, size_t sz, const char * payload) {
 }
 
 void net::Socket::wait(size_t &recv, size_t &sent) {
-	dgram sent_pkt, recv_pkt;
+	dgram sent_pkt[WINDOW_SIZE], recv_pkt;
 
 	// Initialize to 0
 	recv = 0;
 	sent = 0;
 
-	bool packet_sent(false); // Whether the current packet, if any, has been sent
+	bool sndr_acked[WINDOW_SIZE], recv_acked[WINDOW_SIZE];
+	int timeouts[WINDOW_SIZE];
+	for (int i = 0; i < WINDOW_SIZE; i++) {
+		recv_acked[i] = false;
+		sndr_acked[i] = false;
+		timeouts[i] = 0;
+	}
 
 	// Loop until there is no job left.
 	while (sndr_len > 0 || recv_len > 0) {
 
-		if (sndr_len > 0 && !packet_sent) {
+		if (sndr_len > 0) {
 			// We have some outstanding bytes to send.
-			size_t pl_size = min(MAX_PAYLOAD_SIZE, sndr_len);
-			data(sent_pkt, sndr_seqno, pl_size, sndr_buf);
-			if (trace) tracefile << "SENDER: Sending packet #" << sent_pkt.seqno << "\n";
-			send_dgram(sent_pkt);
-			packet_sent = true;
+			for (int i = 0; i < WINDOW_SIZE; i++) {
+				if (timeouts[i] > 0) continue; // Already sent, waiting for ACK
+				if (sndr_acked[i]) continue; // Already ACKed
+				if (sndr_len > i * MAX_PAYLOAD_SIZE) {
+					sent_pkt[i].size = min(MAX_PAYLOAD_SIZE, sndr_len - (i * MAX_PAYLOAD_SIZE));
+				}
+				else {
+					sent_pkt[i].size = 0;
+				}
+				if (sent_pkt[i].size == 0) continue; // Not a real packet (beyond our send buffer)
+				data(sent_pkt[i], (sndr_seqno + i) % SEQNO_MAX, sent_pkt[i].size, sndr_buf + (i*MAX_PAYLOAD_SIZE));
+				if (trace) std::cout << "SENDER: Sending packet #" << sent_pkt[i].seqno << " of size " << sent_pkt[i].size << "\n";
+				send_dgram(sent_pkt[i]);
+				timeouts[i] = NET_TIMEOUT;
+			}
 		}
 
 		// Wait for a packet.
+		clock_t begin_time = clock();
 		int status = recv_dgram(recv_pkt);
+		int recv_elapsed = (clock() - begin_time) / (CLOCKS_PER_SEC / 1000);
+
 		if (status == SOCKET_ERROR) {
 			if (WSAGetLastError() == WSAETIMEDOUT) {
-				// Timed out, try sending packet again
-				packet_sent = false;
+				// Complete silence on the wire, try sending ALL packets again
+				for (int i = 0; i < WINDOW_SIZE; i++) {
+					timeouts[i] = 0;
+				}
 				continue;
 			}
 			// This is another type of error.
 			traceError(WSAGetLastError(), "SOCKET_ERROR while waiting for packet.");
 			throw new SocketException("Could not receive packet!");
+		}
+
+		// Update timeouts according to time elapsed during recv
+		for (int i = 0; i < WINDOW_SIZE; i++) {
+			timeouts[i] -= recv_elapsed;
 		}
 
 		// We have something; how we react depends on the type of packet received.
@@ -110,15 +137,34 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		case ACK: 
 			// Were we waiting for one of these?
 			if (sndr_len > 0) {
-				// Yes. Is this the one we were waiting for?
-				if (recv_pkt.seqno == sent_pkt.seqno) {
-					if (trace) tracefile << "SENDER: Received ACK for packet #" << recv_pkt.seqno << "\n";
-					// Yes. Packet was acknowledged. 
+				// Yes. Is this one of the ones we were waiting for?
+				for (int i = 0; i < WINDOW_SIZE; i++) {
+					if (sent_pkt[i].size < 0) continue; // Not a real packet.
+					if (sndr_acked[i]) continue; // Already ACKed, so whatever
+					if (recv_pkt.seqno == sent_pkt[i].seqno) {
+						if (trace) std::cout << "SENDER: Received ACK for packet #" << recv_pkt.seqno << "\n";
+						// Yes. Packet was acknowledged. 
+						sndr_acked[i] = true;
+					}
+				}
+				// Slide the sender window until we have a non-acked packet heading it
+				while (sndr_acked[0]) {
+					// Update sender state
 					sndr_seqno = nextSeqNo(sndr_seqno);
-					sndr_len -= sent_pkt.size;
-					sndr_buf += sent_pkt.size;
-					sent += sent_pkt.size;
-					packet_sent = false;
+					sndr_buf += sent_pkt[0].size;
+					sndr_len -= sent_pkt[0].size;
+					sent += sent_pkt[0].size;
+
+					// Slide window
+					for (int j = 0; j < WINDOW_SIZE - 1; j++) {
+						sent_pkt[j] = sent_pkt[j + 1];
+						timeouts[j] = timeouts[j + 1];
+						sndr_acked[j] = sndr_acked[j + 1];
+					}
+					// The new "last packet" is automatically timed out because it has never been sent yet
+					sent_pkt[WINDOW_SIZE - 1].size = 0;
+					timeouts[WINDOW_SIZE - 1] = 0;
+					sndr_acked[WINDOW_SIZE - 1] = false;
 				}
 			}
 			// In all other cases, simply discard.
@@ -126,35 +172,50 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		case DATA:
 			// Were we waiting for one of these?
 			if (recv_len > 0) {
-				size_t expected_size = min(MAX_PAYLOAD_SIZE, recv_len);
-				// Yes. Is this the one we were waiting for?
-				if (recv_pkt.seqno == recv_seqno && recv_pkt.size == expected_size) {
-					if (trace) tracefile << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << "\n";
-					// Yes. We have received the expected packet.
-					memcpy(recv_buf, recv_pkt.payload, recv_pkt.size); // Copy payload bytes into buffer
+				for (int i = 0; i < WINDOW_SIZE; i++) {
+					int seqno = recv_seqno + i % SEQNO_MAX;
+					if (recv_pkt.seqno == seqno) {
+						// Packet falls within window.
+						if (!recv_acked[i]) {
+							// Check that packet size matches expected size
+							size_t expected_size = min(MAX_PAYLOAD_SIZE, recv_len - (i * MAX_PAYLOAD_SIZE));
+							if (expected_size != recv_pkt.size) {
+								// Problematic case: we received a DATA packet with the correct SeqNo but wrong number of bytes
+								if (trace) std::cout << "RECEIVER: Received DATA packet has correct #" << recv_pkt.seqno << " but with " << recv_pkt.size << " bytes.\n";
+								// This is DEFINITELY an un-recoverable error.
+								throw new SocketException("RECEIVER: DATA packet has correct sequence number but wrong size!");
+							}
+							// This is the first time we receive this packet.
+							if (trace) std::cout << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << " of size " << recv_pkt.size << "\n";
+							memcpy(recv_buf + (i*MAX_PAYLOAD_SIZE), recv_pkt.payload, recv_pkt.size); // Copy payload bytes into buffer
+							recv_acked[i] = true;
+						}
+					}
+				}
+				// ACK the packet we have received
+				if (trace) std::cout << "RECEIVER: Acknowledged packet #" << recv_pkt.seqno << "\n";
+				send_ack(recv_pkt);
+				// Slide the receiver window, if necessary.
+				while (recv_acked[0]) {
+					// Update receiver state
+					size_t pktsize = min(MAX_PAYLOAD_SIZE, recv_len);
+
 					recv_seqno = nextSeqNo(recv_seqno);
-					recv_len -= recv_pkt.size;
-					recv_buf += recv_pkt.size;
-					recv += recv_pkt.size;
-					send_ack(recv_pkt);
-				}
-				else if (recv_pkt.seqno != recv_seqno) {
-					// Packet does not have correct sequence number. 
-					if (trace) tracefile << "RECEIVER: Received unexpected DATA packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
-					// Should we acknowledge this? This is unclear.
-					send_ack(recv_pkt);
-				}
-				else {
-					// Problematic case: we received a DATA packet with the correct SeqNo but wrong number of bytes
-					if (trace) tracefile << "RECEIVER: Received DATA packet has correct #" << recv_pkt.seqno << " but with " << recv_pkt.size << " bytes.\n";
-					// This is DEFINITELY an un-recoverable error.
-					throw new SocketException("RECEIVER: DATA packet has correct sequence number but wrong size!");
+					recv_len -= pktsize;
+					recv_buf += pktsize;
+					recv += pktsize;
+
+					// Slide window
+					for (int j = 0; j < WINDOW_SIZE - 1; j++) {
+						recv_acked[j] = recv_acked[j + 1];
+					}
+					recv_acked[WINDOW_SIZE - 1] = false;
 				}
 			}
 			else {
 				// Problematic case: we received a DATA packet while we were not expecting any
-				if (trace) tracefile << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
-				// We should not acknowledge this one.
+				if (trace) std::cout << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
+				send_ack(recv_pkt);
 			}
 			break;
 
@@ -188,6 +249,7 @@ size_t net::Socket::recv(char * buf, int len) {
 }
 
 int net::Socket::recv_dgram(dgram &pkt, bool acceptDest) {
+
 	fd_set fds;
 	int n;
 	struct timeval tv;
