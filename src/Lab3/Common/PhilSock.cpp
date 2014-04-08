@@ -83,6 +83,8 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 		timeouts[i] = 0;
 	}
 
+	//std::cout << "INIT JOBS: Sender(" << sndr_len << ", #" << sndr_seqno << "), Receiver(" << recv_len << ", #" << recv_seqno << ")\n";
+
 	// Loop until there is no job left.
 	while (sndr_len > 0 || recv_len > 0) {
 
@@ -162,7 +164,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 						sndr_acked[j] = sndr_acked[j + 1];
 					}
 					// The new "last packet" is automatically timed out because it has never been sent yet
-					sent_pkt[WINDOW_SIZE - 1].size = 0;
+					data(sent_pkt[WINDOW_SIZE - 1], -1, 0, NULL);
 					timeouts[WINDOW_SIZE - 1] = 0;
 					sndr_acked[WINDOW_SIZE - 1] = false;
 				}
@@ -173,7 +175,9 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 			// Were we waiting for one of these?
 			if (recv_len > 0) {
 				for (int i = 0; i < WINDOW_SIZE; i++) {
-					int seqno = recv_seqno + i % SEQNO_MAX;
+					size_t buf_offset = (i * MAX_PAYLOAD_SIZE);
+					if (buf_offset >= recv_len) continue; // Ignore window entries beyond buffer size
+					int seqno = (recv_seqno + i) % SEQNO_MAX;
 					if (recv_pkt.seqno == seqno) {
 						// Packet falls within window.
 						if (!recv_acked[i]) {
@@ -181,13 +185,13 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 							size_t expected_size = min(MAX_PAYLOAD_SIZE, recv_len - (i * MAX_PAYLOAD_SIZE));
 							if (expected_size != recv_pkt.size) {
 								// Problematic case: we received a DATA packet with the correct SeqNo but wrong number of bytes
-								if (trace) tracefile << "RECEIVER: Received DATA packet has correct #" << recv_pkt.seqno << " but with " << recv_pkt.size << " bytes.\n";
+								if (trace) tracefile << "RECEIVER: Packet #" << recv_pkt.seqno << " has unexpected size " << recv_pkt.size << " (expected " << expected_size << ").\n";
 								// This is DEFINITELY an un-recoverable error.
 								throw new SocketException("RECEIVER: DATA packet has correct sequence number but wrong size!");
 							}
 							// This is the first time we receive this packet.
 							if (trace) tracefile << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << " of size " << recv_pkt.size << "\n";
-							memcpy(recv_buf + (i*MAX_PAYLOAD_SIZE), recv_pkt.payload, recv_pkt.size); // Copy payload bytes into buffer
+							memcpy(recv_buf + buf_offset, recv_pkt.payload, recv_pkt.size); // Copy payload bytes into buffer
 							recv_acked[i] = true;
 						}
 					}
@@ -214,14 +218,24 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 			}
 			else {
 				// Problematic case: we received a DATA packet while we were not expecting any
-				if (trace) tracefile << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
-				send_ack(recv_pkt);
+				if (recv_seqno == recv_pkt.seqno) {
+					// This is the 1000$ bug that's not covered in the textbook
+					// Other side has switched mode and is sending early. 
+					// Do NOT acknowledge this packet.
+					if (trace) tracefile << "RECEIVER: Unexpected packet #" << recv_pkt.seqno << " with size " << recv_pkt.size << " will NOT be acknowledged.\n";
+				}
+				else {
+					// This is probably an old DATA packet, acknowledge it
+					if (trace) tracefile << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
+					send_ack(recv_pkt);
+				}
 			}
 			break;
 
 		default: break; // Default is to discard packet.
 		}
 	}
+	//std::cout << "FINISH JOBS: Sender(" << sndr_len << ", #" << sndr_seqno << "), Receiver(" << recv_len << ", #" << recv_seqno << ")\n";
 }
 
 size_t net::Socket::send(const char * buf, int len) {
@@ -380,7 +394,13 @@ void net::ServerSocket::listen(int backlog) {
 			throw new SocketException("Could not receive SYN from a client!");
 		}
 		if (recvbytes < sizeof(dgram)) continue; // Throw away unexpected packet
-		if (_syn.type != SYN) continue; //Throw away unexpected packet
+		if (_syn.type != SYN) {
+			if (_syn.type == DATA) {
+				// Last packet of previous connection was dropped or delayed
+				send_ack(_syn);
+			}
+			continue; //Throw away unexpected packet
+		}
 
 		break;
 	}
