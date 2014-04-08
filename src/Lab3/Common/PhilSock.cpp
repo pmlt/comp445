@@ -99,7 +99,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 				}
 				if (sent_pkt[i].size == 0) continue; // Not a real packet (beyond our send buffer)
 				data(sent_pkt[i], (sndr_seqno + i) % SEQNO_MAX, sent_pkt[i].size, sndr_buf + (i*MAX_PAYLOAD_SIZE));
-				if (trace) std::cout << "SENDER: Sending packet #" << sent_pkt[i].seqno << " of size " << sent_pkt[i].size << "\n";
+				if (trace) tracefile << "SENDER: Sending packet #" << sent_pkt[i].seqno << " of size " << sent_pkt[i].size << "\n";
 				send_dgram(sent_pkt[i]);
 				timeouts[i] = NET_TIMEOUT;
 			}
@@ -142,7 +142,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 					if (sent_pkt[i].size < 0) continue; // Not a real packet.
 					if (sndr_acked[i]) continue; // Already ACKed, so whatever
 					if (recv_pkt.seqno == sent_pkt[i].seqno) {
-						if (trace) std::cout << "SENDER: Received ACK for packet #" << recv_pkt.seqno << "\n";
+						if (trace) tracefile << "SENDER: Received ACK for packet #" << recv_pkt.seqno << "\n";
 						// Yes. Packet was acknowledged. 
 						sndr_acked[i] = true;
 					}
@@ -181,19 +181,19 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 							size_t expected_size = min(MAX_PAYLOAD_SIZE, recv_len - (i * MAX_PAYLOAD_SIZE));
 							if (expected_size != recv_pkt.size) {
 								// Problematic case: we received a DATA packet with the correct SeqNo but wrong number of bytes
-								if (trace) std::cout << "RECEIVER: Received DATA packet has correct #" << recv_pkt.seqno << " but with " << recv_pkt.size << " bytes.\n";
+								if (trace) tracefile << "RECEIVER: Received DATA packet has correct #" << recv_pkt.seqno << " but with " << recv_pkt.size << " bytes.\n";
 								// This is DEFINITELY an un-recoverable error.
 								throw new SocketException("RECEIVER: DATA packet has correct sequence number but wrong size!");
 							}
 							// This is the first time we receive this packet.
-							if (trace) std::cout << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << " of size " << recv_pkt.size << "\n";
+							if (trace) tracefile << "RECEIVER: Received expected DATA packet #" << recv_pkt.seqno << " of size " << recv_pkt.size << "\n";
 							memcpy(recv_buf + (i*MAX_PAYLOAD_SIZE), recv_pkt.payload, recv_pkt.size); // Copy payload bytes into buffer
 							recv_acked[i] = true;
 						}
 					}
 				}
 				// ACK the packet we have received
-				if (trace) std::cout << "RECEIVER: Acknowledged packet #" << recv_pkt.seqno << "\n";
+				if (trace) tracefile << "RECEIVER: Acknowledged packet #" << recv_pkt.seqno << "\n";
 				send_ack(recv_pkt);
 				// Slide the receiver window, if necessary.
 				while (recv_acked[0]) {
@@ -214,7 +214,7 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 			}
 			else {
 				// Problematic case: we received a DATA packet while we were not expecting any
-				if (trace) std::cout << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
+				if (trace) tracefile << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
 				send_ack(recv_pkt);
 			}
 			break;
