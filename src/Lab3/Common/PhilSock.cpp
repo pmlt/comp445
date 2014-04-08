@@ -136,13 +136,26 @@ void net::Socket::wait(size_t &recv, size_t &sent) {
 					recv_len -= recv_pkt.size;
 					recv_buf += recv_pkt.size;
 					recv += recv_pkt.size;
+					send_ack(recv_pkt);
+				}
+				else if (recv_pkt.seqno != recv_seqno) {
+					// Packet does not have correct sequence number. 
+					if (trace) tracefile << "RECEIVER: Received unexpected DATA packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
+					// Should we acknowledge this? This is unclear.
+					send_ack(recv_pkt);
 				}
 				else {
-					if (trace) tracefile << "RECEIVER: Received unexpected DATA packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
+					// Problematic case: we received a DATA packet with the correct SeqNo but wrong number of bytes
+					if (trace) tracefile << "RECEIVER: Received DATA packet has correct #" << recv_pkt.seqno << " but with " << recv_pkt.size << " bytes.\n";
+					// This is DEFINITELY an un-recoverable error.
+					throw new SocketException("RECEIVER: DATA packet has correct sequence number but wrong size!");
 				}
 			}
-			if (trace) tracefile << "RECEIVER: Acknowledging packet #" << recv_pkt.seqno << "\n";
-			send_ack(recv_pkt); // Acknowledge the packet in all cases.
+			else {
+				// Problematic case: we received a DATA packet while we were not expecting any
+				if (trace) tracefile << "RECEIVER: Acknowledging unexpected packet #" << recv_pkt.seqno << " with " << recv_pkt.size << " bytes.\n";
+				// We should not acknowledge this one.
+			}
 			break;
 
 		default: break; // Default is to discard packet.
