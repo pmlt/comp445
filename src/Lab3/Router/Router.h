@@ -21,7 +21,7 @@ using namespace std ;
 #define PEER_PORT2 5001				//port number of peer host 2
 #define TIMEOUT_USEC 300000			//time-out value
 
-#define TRACE 1
+#define TRACE 0
 
 struct EVENT_LIST
 {
