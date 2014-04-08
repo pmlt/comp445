@@ -5,10 +5,10 @@
 #include <conio.h>
 
 #define TRACE true
-#define FILE  "sample.pdf"
+#define FILE  "sample.jpg"
 
-//#define LOCAL_PORT 5001
-#define LOCAL_PORT 0x7070
+#define LOCAL_PORT 5001
+//#define LOCAL_PORT 0x7070
 
 using namespace std;
 
@@ -53,9 +53,13 @@ int main() {
 
 	cout << "About to receive " << filesize << " bytes." << endl;
 
-	size_t bytes = socket.recv(buf, filesize);
+	for (int ws = 3; ws <= 19; ws = ws + 2) {
+		cout << "Receiving file for window size = " << ws << endl;
+		socket.params.window_size = ws;
+		size_t bytes = socket.recv(buf, filesize);
+		cout << "Received " << bytes << " bytes, writing to file " << FILE << endl;
+	}
 
-	cout << "Received " << bytes << " bytes, writing to file " << FILE << endl;
 	file.write(buf, filesize);
 	
 

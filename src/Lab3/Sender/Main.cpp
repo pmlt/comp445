@@ -5,17 +5,19 @@
 #include <conio.h>
 
 #define TRACE true
-#define FILE  "sample.pdf"
+#define FILE  "sample.jpg"
 
 #define REMOTE_HOST "localhost"
-//#define REMOTE_PORT 7000
-//#define LOCAL_PORT  5000
-#define REMOTE_PORT 0x7070
-#define LOCAL_PORT  0x7071
+#define REMOTE_PORT 7000
+#define LOCAL_PORT  5000
+//#define REMOTE_PORT 0x7070
+//#define LOCAL_PORT  0x7071
 
 using namespace std;
 
 int main() {
+
+	net::statistics transfer_stats;
 
 	WSADATA wsadata;
 	if (WSAStartup(0x0202, &wsadata) != 0) {
@@ -66,8 +68,16 @@ int main() {
 
 	// First send the size, then send the file
 	socket.send((const char*)&(stats.st_size), sizeof(stats.st_size));
-	int bsent = socket.send(buf, stats.st_size);
-	cout << "Sent " << bsent << " bytes." << endl;
+
+	for (int ws = 3; ws <= 19; ws = ws + 2) {
+		cout << "Sending file with windows size = " << ws << endl;
+		socket.params.window_size = ws;
+		int bsent = socket.send(buf, stats.st_size, &transfer_stats);
+		cout << "  Report:\n  Bytes sent: " << bsent << endl;
+		cout << "  Time elapsed: " << transfer_stats.transfer_time << "ms." << endl;
+		cout << "  Minimum # of packets: " << transfer_stats.packets_required << endl;
+		cout << "  # of packets sent: " << transfer_stats.packets_sent << endl;
+	}
 	
 	free(buf);
 
